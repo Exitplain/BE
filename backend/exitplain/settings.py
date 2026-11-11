@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'common',
 ]
 
 MIDDLEWARE = [
@@ -125,3 +127,13 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# --- 백엔드 B: 새 테스트 위저드 설정 ---
+# TestPlan·Discovery가 참조할 프로젝트 모델. 백엔드 A의 모델 경로로 바꾼다.
+EXITPLAIN_PROJECT_MODEL = 'projects.Project'
+# 사이트 확인(탐색) 결과 유효 시간(초). docs/API_SPEC.md 4.1의 15분과 같음
+EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
+# 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
+EXITPLAIN_PERSONA_GENERATOR = None
+# 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
+EXITPLAIN_APPEND_DEMO_QUERY = True
