@@ -1,0 +1,12 @@
+{
+  "skyvern": "1.0.56",
+  "skyvern_ui": "1.0.56",
+  "localServer.js_sha256": "8605a1e2bf449c4e6505f69595bf1ada17b28899c12739a26578a6803c8083d6",
+  "localServer.js_source": "https://github.com/Skyvern-AI/skyvern/blob/main/skyvern-frontend/localServer.js",
+  "node_dependencies": {
+    "serve-handler": "6.1.7",
+    "open": "10.1.0"
+  },
+  "postgresql": "16.2",
+  "runtime": "isolated native processes; Docker not required"
+}

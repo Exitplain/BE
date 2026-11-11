@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "run_id": "first_gui_probe",
+  "target_url": "http://127.0.0.1:8000/normal",
+  "allowed_origins": ["http://127.0.0.1:8000"],
+  "goal": "테스트 식별자를 입력하고 모의 주문을 완료한다",
+  "success_path": "/success",
+  "personas": [
+    {"id": "A", "context": "처음 방문한 사용자", "max_required_fields": 6, "frustration_threshold": 60},
+    {"id": "B", "context": "입력이 번거로우면 포기하는 사용자", "max_required_fields": 3, "frustration_threshold": 60}
+  ],
+  "max_steps": 20,
+  "timeout_seconds": 120,
+  "concurrency": 2
+}

@@ -302,3 +302,18 @@ artifacts/
 .DS_Store
 node_modules/
 *.pdf
+# Imported agent ignores
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+artifacts/
+.taste-skill/
+.vscode/
+*.pdf
+.DS_Store
+node_modules/

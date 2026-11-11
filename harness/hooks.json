@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "activation": "manual",
+  "installed_in_git_or_ci": false,
+  "hooks": [
+    {
+      "name": "after-change-browser",
+      "when": "agent, tests, SaaS frontend, or controlled demo site changed",
+      "argv": ["python", "scripts/verify_harness.py", "--profile", "browser"],
+      "billable_model_calls": false,
+      "success_exit_code": 0,
+      "failure_exit_codes": [1, 2]
+    },
+    {
+      "name": "explicit-live-model-smoke",
+      "when": "live model validation explicitly requested",
+      "argv": ["python", "scripts/verify_harness.py", "--profile", "model", "--model", "<EXACT_MODEL_ID>", "--allow-model-call"],
+      "requires_env": ["OPENAI_API_KEY"],
+      "billable_model_calls": true,
+      "success_exit_code": 0,
+      "failure_exit_codes": [1, 2]
+    }
+  ],
+  "artifacts": "artifacts/harness/<execution-id>/verdict.json"
+}
