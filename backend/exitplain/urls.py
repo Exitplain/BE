@@ -22,4 +22,5 @@ urlpatterns = [
     # --- 백엔드 B: 새 테스트 위저드 (docs/API_SPEC.md 8절 /api/v1) ---
     path('api/v1/', include('discoveries.urls')),
     path('api/v1/', include('plans.urls')),
+    path('api/v1/', include('personas.urls')),
 ]
