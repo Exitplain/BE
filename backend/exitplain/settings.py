@@ -40,7 +40,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'common',
     'projects',  
-    'discoveries'
+    'discoveries',
+    'plans'
 ]
 
 MIDDLEWARE = [
