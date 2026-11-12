@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'discoveries',
     'plans',
     'personas',
+    'reports',
 ]
 
 MIDDLEWARE = [

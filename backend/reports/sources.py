@@ -1,0 +1,75 @@
+"""실행 결과를 '세션 기록' 목록으로 바꾸는 곳. 집계 코드는 이 목록만 본다.
+
+세션 기록 1개 모양:
+    {"task_id": "order", "seed": 1, "persona_id": "P-001",
+     "status": "success" | "simulated_dropout" | "agent_failure" | ... | "incomplete",
+     "reason": "...", "steps": 7, "paths": ["/", "/product", ...]}   # 관측한 화면 경로, 순서대로
+
+지금은 에이전트가 남기는 파일(input.json, events.jsonl)에서 만든다 (load_from_run_dir).
+백엔드 A의 Session·Event 모델이 생기면 같은 모양을 돌려주는 load_from_db()를 추가하면 된다.
+"""
+import json
+import re
+from pathlib import Path
+from urllib.parse import urlsplit
+
+# plans.run_input.build_run_input이 만드는 run_id 형식: {run_id}_{task_id}_s{seed}
+RUN_ID_PATTERN = re.compile(r"^(?P<run>.+)_(?P<task>[A-Za-z0-9-]+)_s(?P<seed>\d+)$")
+
+
+class SourceError(ValueError):
+    pass
+
+
+def _read_jsonl(path):
+    events = []
+    for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SourceError(f"{path.name} {no}번째 줄이 JSON이 아닙니다.") from exc
+    return sorted(events, key=lambda e: e.get("sequence", 0))
+
+
+def load_attempt(attempt_dir):
+    """실행 폴더 1개(= RunInput 1건 = 과업 1개 × 시드 1회)를 세션 기록 목록으로 바꾼다."""
+    attempt_dir = Path(attempt_dir)
+    input_file, events_file = attempt_dir / "input.json", attempt_dir / "events.jsonl"
+    if not input_file.is_file() or not events_file.is_file():
+        raise SourceError(f"{attempt_dir}에 input.json 또는 events.jsonl이 없습니다.")
+    run_input = json.loads(input_file.read_text(encoding="utf-8"))
+    match = RUN_ID_PATTERN.match(run_input.get("run_id", ""))
+    if not match:
+        raise SourceError(f"run_id 형식이 {{run}}_{{task}}_s{{seed}}가 아닙니다: {run_input.get('run_id')}")
+    task_id, seed = match["task"], int(match["seed"])
+
+    sessions = {}
+    for event in _read_jsonl(events_file):
+        sid = event.get("session_id")
+        payload = event.get("payload") or {}
+        if event.get("type") == "session.started":
+            persona_id = (payload.get("persona") or {}).get("id") or sid.removeprefix("session_")
+            sessions[sid] = {"task_id": task_id, "seed": seed, "persona_id": persona_id,
+                             "status": "incomplete", "reason": "종료 이벤트 없음", "steps": 0, "paths": []}
+        elif sid in sessions and event.get("type") == "observation.created":
+            sessions[sid]["paths"].append(urlsplit(payload.get("url", "")).path or "/")
+        elif sid in sessions and event.get("type") == "session.finished":
+            sessions[sid].update(status=payload.get("status", "incomplete"), reason=payload.get("reason", ""),
+                                 steps=payload.get("steps", 0))
+    return list(sessions.values())
+
+
+def load_from_run_dir(root):
+    """root 아래의 실행 폴더(events.jsonl이 있는 폴더)를 모두 읽는다. 순서는 경로순."""
+    root = Path(root)
+    if not root.is_dir():
+        raise SourceError(f"폴더가 없습니다: {root}")
+    attempts = sorted({p.parent for p in root.rglob("events.jsonl")})
+    if not attempts:
+        raise SourceError(f"{root} 아래에 events.jsonl이 없습니다.")
+    records = []
+    for attempt in attempts:
+        records.extend(load_attempt(attempt))
+    return records
