@@ -19,7 +19,7 @@ class PlanCreateTests(WizardMixin, TestCase):
         self.assertEqual(plan["revision"], 1)
         self.assertEqual(plan["task_ids"], list(DEFAULT_TASK_IDS))
         self.assertEqual([s["count"] for s in plan["segments"]], [5, 5, 5, 5])
-        self.assertEqual(plan["limits"]["concurrency"], 3)
+        self.assertEqual(plan["limits"]["concurrency"], 5)   # Figma 동시 5세션
         self.assertEqual(plan["task_funnels"][0]["stages"][0], {"id": "stage_landing", "name": "랜딩", "order": 0})
 
     def test_etag_header(self, _):
@@ -110,7 +110,8 @@ class PlanStep3Tests(WizardMixin, TestCase):
 
     def test_limits_and_frustration(self, _):
         plan = self.ready_plan()
-        self.assertEqual(self.patch(plan, {"limits": {"concurrency": 5}}).status_code, 422)
+        self.assertEqual(self.patch(plan, {"limits": {"concurrency": 6}}).status_code, 422)
+        self.assertEqual(self.patch(plan, {"limits": {"request_interval_seconds": 6}}).status_code, 422)
         self.assertEqual(self.patch(plan, {"limits": {"seed_count": 4}}).status_code, 422)
         res = self.patch(plan, {"limits": {"seed_count": 2, "cost_cap": 3.5}, "frustration_enabled": False})
         self.assertEqual(res.status_code, 200)

@@ -19,11 +19,10 @@ PERSONA_TOTAL = 20
 DEFAULT_SEGMENTS = [{"id": s, "count": 5} for s in SEGMENT_IDS]
 
 # 실행 조건. Figma P05b: 모바일 390 · 동시 5세션 · 요청 간격 1초 · 시드 3회 · 스텝 40 · 5분 · 비용 상한(값 확인 필요)
-# concurrency만 Figma(5)와 다르다: agent.schemas.RunInput 상한이 4라 범위를 1~4로 두고,
-# 기본값은 API_SPEC 예시·현재 개발 서버 한도인 3으로 둔다.
+# 범위는 agent.schemas.RunInput 상한과 같게 둔다 (동시 실행 1~5, 요청 간격 0~5초).
 DEFAULT_LIMITS = {
     "viewport_width": 390,
-    "concurrency": 3,
+    "concurrency": 5,
     "request_interval_seconds": 1.0,
     "seed_count": 3,
     "max_steps": 40,
@@ -32,8 +31,8 @@ DEFAULT_LIMITS = {
 }
 LIMIT_RANGES = {  # (최소, 최대, 정수만)
     "viewport_width": (320, 1920, True),
-    "concurrency": (1, 4, True),
-    "request_interval_seconds": (0.0, 10.0, False),
+    "concurrency": (1, 5, True),
+    "request_interval_seconds": (0.0, 5.0, False),
     "seed_count": (1, 3, True),
     "max_steps": (1, 100, True),
     "timeout_seconds": (30, 600, True),
