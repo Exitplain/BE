@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from common.projects import get_owned_project
 from common.views import BaseAPIView
 
-from . import services
+from . import services, url_check
 from .serializers import ProjectCreateSerializer, ProjectListQuerySerializer
 
 
@@ -31,3 +31,14 @@ class ProjectDetailView(BaseAPIView):
     def get(self, request, project_id):
         project = get_owned_project(request.user, project_id)
         return Response(services.project_detail(project))
+
+
+class ProjectCheckView(BaseAPIView):
+    """POST /api/v1/projects/{id}/check — 5.0 URL 확인 (허용 대상인지, 접속되는지).
+
+    확인 결과가 접속 불가여도 요청 자체는 성공이므로 200 이다. 결과는 프로젝트에 저장된다.
+    """
+
+    def post(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        return Response({"project_id": project.pk, "check": url_check.check_project_url(project)})
