@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/6.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
-
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'plans',
     'personas',
     'reports',
+    'accounts',
 ]
 
 MIDDLEWARE = [
@@ -142,3 +143,17 @@ EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
 EXITPLAIN_PERSONA_GENERATOR = None
 # 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
 EXITPLAIN_APPEND_DEMO_QUERY = True
+
+# --- 백엔드 B: 로그인·세션 (accounts) ---
+# 로그인 유지 시간(초). 요청할 때마다 다시 늘어난다(마지막 사용 후 이 시간이 지나면 만료 → L09 세션 만료 모달)
+SESSION_COOKIE_AGE = int(os.environ.get('SESSION_COOKIE_AGE', 60 * 60 * 8))
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+# 이메일 로그인 코드: 유효 10분, 재전송 60초 뒤, 입력 5번까지
+EXITPLAIN_LOGIN_CODE_TTL_SECONDS = 600
+EXITPLAIN_LOGIN_CODE_RESEND_SECONDS = 60
+EXITPLAIN_LOGIN_CODE_MAX_ATTEMPTS = 5
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Exitplain <no-reply@exitplain.local>')
+# Google 로그인: Google Cloud Console에서 발급한 OAuth 클라이언트 ID (프론트와 같은 값)
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')

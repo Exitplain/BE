@@ -4,3 +4,5 @@ django-cors-headers==4.9.0
 djangorestframework==3.18.3
 sqlparse==0.6.1
 tzdata==2026.6
+google-auth>=2.30
+requests>=2.31
