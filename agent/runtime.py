@@ -17,6 +17,10 @@ ISSUE_SUMMARIES = {
     "input_burden": "Visible required fields exceed persona budget",
     "cost": "Extra cost appeared late in the flow",
     "navigation": "Persona wandered or went back without progress",
+    "value": "Price was not visible on the detail screen",
+    "trust": "Personal information was requested before payment",
+    "technical": "The screen was slow or showed an error message",
+    "accessibility": "Unlabeled fields or small touch targets",
 }
 
 
@@ -83,6 +87,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     meter = PersonaMeter(persona, config.seed)
                     last_action = None
                     stage = None
+                    wait_seconds = 0.0
 
                     async def capture(name):
                         path = folder / name
@@ -91,7 +96,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         return str(path)
 
                     async def body():
-                        nonlocal policy, last_action, stage
+                        nonlocal policy, last_action, stage, wait_seconds
                         await emit("session.started", sid, {"persona": persona.model_dump()})
                         if await cancelled():
                             state.update(status="cancelled", reason="Cancellation requested")
@@ -117,7 +122,8 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 {k: v for k, v in obs.items() if k != "screenshot"}, ensure_ascii=False, indent=2), encoding="utf-8")
                             stage = funnel_stage(obs["url"], config.success_path, config.stage_paths)
                             point = meter.observe(stage, obs["required_fields"], obs["text"],
-                                                  obs.get("cost_warning_boxes", []), last_action)
+                                                  obs.get("cost_warning_boxes", []), last_action, obs["elements"],
+                                                  config.viewport_width, wait_seconds)
                             await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"], "stage": stage,
                                 "artifact": artifact, "required_fields": obs["required_fields"], "text": obs["text"],
                                 "frustration_score": point["score"], "frustration_threshold": point["threshold"]})
@@ -150,6 +156,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             if action.kind == "stop":
                                 state.update(status="agent_failure", reason="Policy stopped without verified completion")
                                 return
+                            acted = time.monotonic()
                             await act(page, action, obs)
                             history.append(action.model_dump())
                             last_action = action.kind
@@ -157,6 +164,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             if blocked:
                                 state.update(status="blocked_auth", reason="An out-of-scope network request was blocked")
                                 return
+                            wait_seconds = time.monotonic() - acted     # 요청 간격(대기)은 빼고 잰다
                             if config.action_interval_seconds:
                                 await asyncio.sleep(config.action_interval_seconds)   # 요청 간격
                         # Verify completion even when the final permitted action succeeded.

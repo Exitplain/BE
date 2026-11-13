@@ -85,3 +85,35 @@ async def test_runtime_uses_persona_values_viewport_and_stage(tmp_path):
     assert status["default"]["terminal_stage"] == status["default"]["stages_reached"][-1]
     step = next(Path(report["output_dir"]).glob("session_default/step_000.json"))
     assert json.loads(step.read_text(encoding="utf-8"))["viewport"]["width"] == 390   # 실제 브라우저 화면 폭
+
+
+
+def field(label="", type_="text", text="", box=None):
+    return {"tag": "input", "type": type_, "label": label, "text": text, "box": box or {"width": 200, "height": 40}}
+
+
+def test_seven_causes_have_figma_names():
+    from agent.behavior import CAUSES
+    assert list(CAUSES.values()) == ["입력 부담", "탐색 실패", "비용 충격", "가치 불명확", "신뢰 부족", "기술 오류·지연", "접근성 장벽"]
+
+
+def test_value_trust_technical_accessibility_signals():
+    meter = PersonaMeter(Persona(id="a"))
+    assert "value" in meter.observe("detail", 0, "오늘의 반찬 식탁")["signals"]                  # 가격 없음
+    assert "value" not in PersonaMeter(Persona(id="a")).observe("detail", 0, "12,900원")["signals"]
+    assert "trust" in PersonaMeter(Persona(id="a")).observe("signup", 0, elements=[field("휴대폰 번호")])["signals"]
+    assert "trust" not in PersonaMeter(Persona(id="a")).observe("payment", 0, elements=[field("휴대폰 번호")])["signals"]
+    assert "technical" in PersonaMeter(Persona(id="a")).observe("browse", 0, wait_seconds=4.2)["signals"]
+    assert "technical" in PersonaMeter(Persona(id="a")).observe("browse", 0, "일시적인 오류가 발생했습니다")["signals"]
+    unlabeled = [field(), field()]
+    assert "accessibility" in PersonaMeter(Persona(id="a")).observe("browse", 0, elements=unlabeled)["signals"]
+    tiny = [{"tag": "button", "type": "", "label": "", "text": "x", "box": {"width": 16, "height": 16}}] * 2
+    assert "accessibility" in PersonaMeter(Persona(id="a")).observe("browse", 0, elements=tiny, viewport_width=390)["signals"]
+    assert "accessibility" not in PersonaMeter(Persona(id="a")).observe("browse", 0, elements=tiny)["signals"]   # 데스크톱
+
+
+def test_each_cause_counted_once_and_primary_cause():
+    meter = PersonaMeter(Persona(id="a", trust_need=100, patience=0))   # 신뢰 45, 임계치 30
+    first = meter.observe("signup", 0, elements=[field("생년월일")])
+    assert first["signals"] == {"trust": 45.0} and first["crossed"] and meter.primary_cause() == "trust"
+    assert meter.observe("signup", 0, elements=[field("생년월일")])["signals"] == {}
