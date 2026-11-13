@@ -7,8 +7,17 @@ from pathlib import Path
 from uuid import uuid4
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
+from .behavior import PersonaMeter
 from .browser import observe, act, origin
+from .funnel import funnel_stage
 from .schemas import RunInput, SessionResult
+
+
+ISSUE_SUMMARIES = {
+    "input_burden": "Visible required fields exceed persona budget",
+    "cost": "Extra cost appeared late in the flow",
+    "navigation": "Persona wandered or went back without progress",
+}
 
 
 async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None):
@@ -54,7 +63,8 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
                              "calls": 0, "input": 0, "output": 0, "issues": [], "artifact": None}
-                    context = await browser.new_context(viewport={"width": 1000, "height": 800}, service_workers="block")
+                    context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
+                                                        service_workers="block")
                     policy = None
                     blocked = []
                     async def guard(route):
@@ -70,7 +80,9 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     page.set_default_timeout(5000)
                     history = []
                     seen_signals = set()
-                    frustration = 0.0
+                    meter = PersonaMeter(persona, config.seed)
+                    last_action = None
+                    stage = None
 
                     async def capture(name):
                         path = folder / name
@@ -79,7 +91,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         return str(path)
 
                     async def body():
-                        nonlocal policy, frustration
+                        nonlocal policy, last_action, stage
                         await emit("session.started", sid, {"persona": persona.model_dump()})
                         if await cancelled():
                             state.update(status="cancelled", reason="Cancellation requested")
@@ -103,21 +115,32 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             artifact = await capture(f"{step_id}.png")
                             (folder / f"{step_id}.json").write_text(json.dumps(
                                 {k: v for k, v in obs.items() if k != "screenshot"}, ensure_ascii=False, indent=2), encoding="utf-8")
-                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"],
-                                "artifact": artifact, "required_fields": obs["required_fields"], "text": obs["text"]})
+                            stage = funnel_stage(obs["url"], config.success_path, config.stage_paths)
+                            point = meter.observe(stage, obs["required_fields"], obs["text"],
+                                                  obs.get("cost_warning_boxes", []), last_action)
+                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"], "stage": stage,
+                                "artifact": artifact, "required_fields": obs["required_fields"], "text": obs["text"],
+                                "frustration_score": point["score"], "frustration_threshold": point["threshold"]})
                             # Independent environment predicate; model's completion claim is ignored.
                             if urlsplit(page.url).path == config.success_path:
                                 state.update(status="success", reason="Configured success path observed")
                                 return
-                            if obs["required_fields"] > persona.max_required_fields and "input_burden" not in seen_signals:
-                                seen_signals.add("input_burden")
-                                frustration += 70
-                                issue = {"category": "input_burden", "summary": "Visible required fields exceed persona budget",
+                            for category in point["signals"]:
+                                if category in seen_signals:
+                                    continue          # 같은 원인은 처음 한 번만 issue로 남김
+                                seen_signals.add(category)
+                                issue = {"category": category, "summary": ISSUE_SUMMARIES[category], "stage": stage,
                                     "evidence_step_ids": [step_id], "artifact": artifact,
-                                    "observed_fields": obs["required_fields"], "configured_limit": persona.max_required_fields}
+                                    "contribution": point["signals"][category]}
+                                if category == "input_burden":
+                                    issue.update(observed_fields=obs["required_fields"],
+                                                 configured_limit=persona.max_required_fields)
                                 state["issues"].append(issue)
-                                await emit("friction.detected", sid, {**issue, "frustration_score": frustration})
-                            if frustration >= persona.frustration_threshold:
+                                await emit("friction.detected", sid, {**issue, "frustration_score": point["score"]})
+                            if point["crossed"]:
+                                cause = meter.primary_cause()
+                                for issue in state["issues"]:
+                                    issue["primary"] = issue["category"] == cause   # 이탈을 일으킨 주 원인 표시
                                 state.update(status="simulated_dropout", reason="Configured frustration threshold exceeded")
                                 return
                             state["calls"] += int(getattr(policy, "name", "") != "scripted_fixture")
@@ -129,10 +152,13 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 return
                             await act(page, action, obs)
                             history.append(action.model_dump())
+                            last_action = action.kind
                             await emit("action.completed", sid, {"step_id": step_id, "action": action.model_dump()})
                             if blocked:
                                 state.update(status="blocked_auth", reason="An out-of-scope network request was blocked")
                                 return
+                            if config.action_interval_seconds:
+                                await asyncio.sleep(config.action_interval_seconds)   # 요청 간격
                         # Verify completion even when the final permitted action succeeded.
                         await capture("final.png")
                         if urlsplit(page.url).path == config.success_path:
@@ -160,7 +186,8 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         status=state["status"], reason=state["reason"], steps=state["steps"],
                         duration_seconds=round(time.monotonic()-started, 3), model_calls=state["calls"],
                         input_tokens=state["input"], output_tokens=state["output"],
-                        issues=state["issues"], final_artifact=state["artifact"])
+                        issues=state["issues"], final_artifact=state["artifact"],
+                        terminal_stage=stage, stages_reached=list(meter.stages))
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
                     await emit("session.finished", sid, result.model_dump())
                     return result
