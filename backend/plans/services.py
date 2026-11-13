@@ -29,6 +29,11 @@ def _check_revision(plan, revision):
         raise ApiError(409, "REVISION_CONFLICT", "다른 곳에서 계획이 바뀌었습니다. 최신 내용을 다시 불러와주세요.")
 
 
+def _check_discovery(plan):
+    if plan.discovery.is_expired:
+        raise ApiError(409, "DISCOVERY_EXPIRED", "사이트 확인 결과가 만료됐습니다. 1단계에서 다시 확인해주세요.")
+
+
 def _locked(plan_id):
     return TestPlan.objects.select_for_update().select_related("discovery", "project").get(pk=plan_id)
 
@@ -67,9 +72,7 @@ def _apply_tasks(plan, task_ids):
     if len(set(task_ids)) != len(task_ids):
         raise validation_error("task_ids", "같은 과업이 두 번 들어 있습니다.")
     plan.task_ids = task_ids
-    # 새 과업에는 초기 퍼널, 뺀 과업의 퍼널은 삭제
-    current = {f["task_id"]: f for f in plan.task_funnels}
-    plan.task_funnels = [current.get(t) or catalog.default_funnel(t) for t in task_ids]
+    plan.task_funnels = [catalog.default_funnel(t) for t in task_ids]   # 과업마다 자동 7단계
 
 
 def _apply_custom_tasks(plan, texts):
@@ -90,36 +93,6 @@ def _apply_audience(plan, audience):
         raise validation_error("audience.ages", "전체와 특정 연령대를 함께 선택할 수 없습니다.")
     plan.audience_context = audience["context"]
     plan.ages = ages
-
-
-def _apply_funnels(plan, funnels):
-    by_task = {}
-    for i, funnel in enumerate(funnels):
-        if funnel["task_id"] in by_task:
-            raise validation_error(f"task_funnels.{i}.task_id", "같은 과업의 퍼널이 두 번 들어 있습니다.")
-        by_task[funnel["task_id"]] = funnel
-    if set(by_task) != set(plan.task_ids):
-        raise validation_error("task_funnels", "선택한 과업마다 퍼널을 한 개씩 보내주세요.")
-
-    current = {f["task_id"]: f for f in plan.task_funnels}
-    result = []
-    for task_id in plan.task_ids:
-        field = f"task_funnels.{plan.task_ids.index(task_id)}"
-        stages = sorted(by_task[task_id]["stages"], key=lambda s: s["order"])
-        current_ids = sorted(s["id"] for s in current[task_id]["stages"])
-        if sorted(s["id"] for s in stages) != current_ids:
-            # Figma P05b: 이름과 순서만 바꿀 수 있다. 단계 ID는 유지
-            raise validation_error(field, "퍼널 단계는 이름과 순서만 바꿀 수 있습니다.")
-        if [s["order"] for s in stages] != list(range(len(stages))):
-            raise validation_error(field, "단계 순서(order)는 0부터 빠짐없이 매겨주세요.")
-        names = [s["name"].strip() for s in stages]
-        if any(not n for n in names):
-            raise validation_error(field, "단계 이름을 입력해주세요.")
-        if len(set(names)) != len(names):
-            raise validation_error(field, "같은 과업 안에 단계 이름이 겹칩니다.")  # Figma P05g
-        result.append({"task_id": task_id,
-                       "stages": [{"id": s["id"], "name": n, "order": s["order"]} for s, n in zip(stages, names)]})
-    plan.task_funnels = result
 
 
 def _apply_segments(plan, segments):
@@ -151,33 +124,15 @@ def update_plan(plan_id, revision, data):
     if "audience" in data:
         _apply_audience(plan, data["audience"])
         fields |= {"audience_context", "ages"}
-    if "task_funnels" in data:
-        _apply_funnels(plan, data["task_funnels"])
-        fields.add("task_funnels")
     if "segments" in data:
         _apply_segments(plan, data["segments"])
         fields.add("segments")
-    if "frustration_enabled" in data:
-        plan.frustration_enabled = data["frustration_enabled"]
-        fields.add("frustration_enabled")
     if "limits" in data:
         plan.limits = {**plan.limits, **data["limits"]}
         fields.add("limits")
     if not fields:
         raise validation_error("non_field_errors", "바꿀 필드를 한 개 이상 보내주세요.")
     return _save(plan, sorted(fields))
-
-
-@transaction.atomic
-def reestimate_funnel(plan_id, revision, task_id):
-    """Figma P05b '다시 추정' — 과업 퍼널을 초기값으로 되돌린다."""
-    plan = _locked(plan_id)
-    _check_revision(plan, revision)
-    if task_id not in plan.task_ids:
-        raise validation_error("task_id", "선택한 과업이 아닙니다.")
-    plan.task_funnels = [catalog.default_funnel(task_id) if f["task_id"] == task_id else f
-                         for f in plan.task_funnels]
-    return _save(plan, ["task_funnels"])
 
 
 # ---------- 시작 전 확인 (P05c) ----------
@@ -210,9 +165,8 @@ def review(plan):
         "tasks": {"names": [tasks[t]["name"] for t in plan.task_ids], "edit_step": 2},
         "audience": {"context": plan.audience_context, "age_labels": _age_labels(plan.ages), "edit_step": 2},
         "not_in_run": {"custom_tasks": plan.custom_tasks, "additional_request": plan.additional_request},
-        "funnels": {"stages_per_task": {f["task_id"]: len(f["stages"]) for f in plan.task_funnels}, "edit_step": 3},
-        "personas": {"segments": len(plan.segments), "total": personas,
-                     "frustration_enabled": plan.frustration_enabled, "edit_step": 3},
+        "funnels": {"auto": True, "stages_per_task": {f["task_id"]: len(f["stages"]) for f in plan.task_funnels}},
+        "personas": {"segments": len(plan.segments), "total": personas, "edit_step": 3},
         "limits": plan.limits,
         "total_sessions": personas * len(plan.task_ids) * seeds,
         "blocking": blocking_reasons(plan),
@@ -237,7 +191,7 @@ def confirm_plan(plan_id, revision, user):
                        {"blocking": [r["code"] for r in reasons]})
 
     tasks = plan.discovery.task_map()
-    funnels = {f["task_id"]: f["stages"] for f in plan.task_funnels}
+    funnels = {t: catalog.default_funnel(t)["stages"] for t in plan.task_ids}
     data = {
         "schema_version": "plan-snapshot-1",
         "plan_id": str(plan.id),
@@ -252,7 +206,7 @@ def confirm_plan(plan_id, revision, user):
         "not_in_run": {"custom_tasks": plan.custom_tasks, "additional_request": plan.additional_request},
         "audience": {"context": plan.audience_context, "ages": plan.ages, "age_labels": _age_labels(plan.ages),
                      "age_usage": "context_only"},
-        "frustration_enabled": plan.frustration_enabled,
+        "frustration_enabled": True,     # 토글이 Figma에서 빠짐. 예전 스냅샷과 같은 모양을 위해 남긴다
         "limits": dict(plan.limits),
     }
     snapshot = PlanSnapshot(plan=plan, plan_revision=plan.revision, data=data,
@@ -282,8 +236,8 @@ def plan_dict(plan):
         "task_ids": plan.task_ids, "custom_tasks": plan.custom_tasks,
         "additional_request": plan.additional_request,
         "audience": {"context": plan.audience_context, "ages": plan.ages},
-        "task_funnels": plan.task_funnels, "segments": plan.segments,
-        "frustration_enabled": plan.frustration_enabled, "limits": plan.limits,
+        "task_funnels": [catalog.default_funnel(t) for t in plan.task_ids],   # 보기 전용 (자동 7단계)
+        "segments": plan.segments, "limits": plan.limits,
         "review": review(plan),
         "snapshots": [{"plan_revision_id": str(s.id), "plan_revision": s.plan_revision,
                        "confirmed_at": s.confirmed_at.isoformat()} for s in plan.snapshots.all()[:10]],

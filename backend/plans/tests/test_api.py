@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -20,7 +19,11 @@ class PlanCreateTests(WizardMixin, TestCase):
         self.assertEqual(plan["task_ids"], list(DEFAULT_TASK_IDS))
         self.assertEqual([s["count"] for s in plan["segments"]], [5, 5, 5, 5])
         self.assertEqual(plan["limits"]["concurrency"], 5)   # Figma 동시 5세션
-        self.assertEqual(plan["task_funnels"][0]["stages"][0], {"id": "stage_landing", "name": "랜딩", "order": 0})
+        funnel = plan["task_funnels"][0]
+        self.assertTrue(funnel["auto"])                                   # Figma P05c: 사이트 분석으로 자동 결정
+        self.assertEqual([s["name"] for s in funnel["stages"]],
+                         ["랜딩", "탐색", "상세", "장바구니", "가입", "결제 정보", "완료"])
+        self.assertNotIn("frustration_enabled", plan)                     # Figma에서 토글이 빠짐
 
     def test_etag_header(self, _):
         plan = self.create_plan()
@@ -70,35 +73,14 @@ class PlanStep2Tests(WizardMixin, TestCase):
 
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class PlanStep3Tests(WizardMixin, TestCase):
-    def test_rename_and_reorder_funnel(self, _):
+    def test_funnel_and_frustration_not_editable(self, _):
         plan = self.ready_plan()
-        funnels = deepcopy(plan["task_funnels"])
-        stages = funnels[0]["stages"]
-        stages[0]["name"] = "첫 화면"
-        stages[1]["order"], stages[2]["order"] = 2, 1
-        res = self.patch(plan, {"task_funnels": funnels})
-        self.assertEqual(res.status_code, 200, res.content)
-        saved = res.json()["task_funnels"][0]["stages"]
-        self.assertEqual([s["id"] for s in saved[:3]], ["stage_landing", "stage_cart", "stage_product"])
-        self.assertEqual(saved[0]["name"], "첫 화면")
-
-    def test_cannot_add_stage(self, _):
-        plan = self.ready_plan()
-        funnels = deepcopy(plan["task_funnels"])
-        funnels[0]["stages"].append({"id": "stage_extra", "name": "추가", "order": 6})
-        self.assertEqual(self.patch(plan, {"task_funnels": funnels}).status_code, 422)
-
-    def test_stage_name_errors(self, _):  # Figma P05g
-        plan = self.ready_plan()
-        funnels = deepcopy(plan["task_funnels"])
-        funnels[0]["stages"][0]["name"] = ""
-        self.assertEqual(self.patch(plan, {"task_funnels": funnels}).status_code, 422)
-        funnels[0]["stages"][0]["name"] = funnels[0]["stages"][1]["name"]
-        self.assertIn("task_funnels.0", self.patch(plan, {"task_funnels": funnels}).json()["error"]["fields"])
-
-    def test_funnels_must_cover_selected_tasks(self, _):
-        plan = self.ready_plan()
-        self.assertEqual(self.patch(plan, {"task_funnels": plan["task_funnels"][:1]}).status_code, 422)
+        res = self.patch(plan, {"task_funnels": plan["task_funnels"]})
+        self.assertIn("task_funnels", res.json()["error"]["fields"])      # 보내면 422
+        self.assertEqual(self.patch(plan, {"frustration_enabled": False}).status_code, 422)
+        res = self.client.post(f"/api/v1/plans/{plan['id']}/task-funnels/order/reestimate",
+                               HTTP_IF_MATCH=f'"{plan["revision"]}"')
+        self.assertEqual(res.status_code, 404)                            # '다시 추정' 없음
 
     def test_segment_total(self, _):  # Figma P05e
         plan = self.ready_plan()
@@ -113,20 +95,10 @@ class PlanStep3Tests(WizardMixin, TestCase):
         self.assertEqual(self.patch(plan, {"limits": {"concurrency": 6}}).status_code, 422)
         self.assertEqual(self.patch(plan, {"limits": {"request_interval_seconds": 6}}).status_code, 422)
         self.assertEqual(self.patch(plan, {"limits": {"seed_count": 4}}).status_code, 422)
-        res = self.patch(plan, {"limits": {"seed_count": 2, "cost_cap": 3.5}, "frustration_enabled": False})
+        res = self.patch(plan, {"limits": {"seed_count": 2, "cost_cap": 3.5}})
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["limits"]["seed_count"], 2)
         self.assertEqual(res.json()["limits"]["max_steps"], 40)  # 안 보낸 값은 유지
-        self.assertFalse(res.json()["frustration_enabled"])
-
-    def test_reestimate(self, _):
-        plan = self.ready_plan()
-        funnels = deepcopy(plan["task_funnels"])
-        funnels[0]["stages"][0]["name"] = "바뀐 이름"
-        plan = self.patch(plan, {"task_funnels": funnels}).json()
-        res = self.client.post(f"/api/v1/plans/{plan['id']}/task-funnels/order/reestimate",
-                               HTTP_IF_MATCH=f'"{plan["revision"]}"')
-        self.assertEqual(res.json()["task_funnels"][0]["stages"][0]["name"], "랜딩")
 
 
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
@@ -146,7 +118,7 @@ class ConfirmationTests(WizardMixin, TestCase):
         snap = self.confirm()
         data = snap["data"]
         self.assertEqual(snap["plan_revision"], 2)
-        self.assertEqual(snap["persona_generator"], "fixture-figma-p07")
+        self.assertEqual(snap["persona_generator"], "rules-v1")
         self.assertEqual(len(data["personas"]), 20)
         self.assertEqual([s["representative"] for s in data["segments"]], ["P-001", "P-006", "P-011", "P-016"])
         self.assertEqual(data["tasks"][0]["funnel"][0]["id"], "stage_landing")
@@ -157,10 +129,10 @@ class ConfirmationTests(WizardMixin, TestCase):
         res = self.client.post(f"/api/v1/plans/{snap['plan_id']}/confirmations", {"revision": 2}, format="json")
         self.assertEqual(res.json()["error"]["code"], "ALREADY_CONFIRMED")
         plan = self.client.get(f"/api/v1/plans/{snap['plan_id']}").json()
-        plan = self.patch(plan, {"frustration_enabled": False}).json()
+        plan = self.patch(plan, {"limits": {"seed_count": 1}}).json()
         snap2 = self.confirm(plan)
         self.assertNotEqual(snap2["plan_revision_id"], snap["plan_revision_id"])
-        self.assertTrue(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["frustration_enabled"])
+        self.assertEqual(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["limits"]["seed_count"], 3)
 
     def test_confirm_after_discovery_expired(self, _):
         plan = self.ready_plan()

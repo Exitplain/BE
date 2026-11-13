@@ -30,13 +30,15 @@ class RunInputTests(WizardMixin, TestCase):
                          (1, 390, 844, 1.0))
         self.assertEqual([i["seed"] for i in inputs[:3]], [1, 2, 3])
         p1 = first.personas[0]
-        self.assertEqual((p1.patience, p1.digital_literacy, p1.price_sensitivity, p1.trust_need), (22, 80, 40, 30))
-        self.assertEqual(first.personas[5].trust_need, 75)          # 두 번째 세그먼트(꼼꼼한 비교형)
+        # 규칙 생성기: 빠른 구매형(22, 80, 40, 30)에 '30대·퇴근·모바일·처음'이 반영된 값
+        self.assertEqual((p1.patience, p1.digital_literacy, p1.price_sensitivity, p1.trust_need), (9, 87, 40, 40))
+        self.assertEqual(first.personas[5].trust_need, 85)          # 두 번째 세그먼트(꼼꼼한 비교형)
         self.assertEqual(p1.frustration_threshold, 60)
 
     def test_frustration_off_and_desktop(self, _):
-        plan = self.patch(self.ready_plan(), {"frustration_enabled": False, "limits": {"viewport_width": 1280}}).json()
+        plan = self.patch(self.ready_plan(), {"limits": {"viewport_width": 1280}}).json()
         snapshot = PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
+        snapshot.data["frustration_enabled"] = False      # 예전 스냅샷(토글이 있던 때) 호환
         inputs = build_run_inputs(snapshot, run_id="r")
         first = RunInput.model_validate(inputs[0])
         self.assertTrue(all(p.frustration_threshold >= 1_000_000 for p in first.personas))   # 가상 이탈 없음

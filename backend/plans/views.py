@@ -58,15 +58,6 @@ class PlanDetailView(BaseAPIView):
         return _plan_response(services.update_plan(plan.pk, revision, serializer.validated_data))
 
 
-class FunnelReestimateView(BaseAPIView):
-    """POST /api/v1/plans/{id}/task-funnels/{task_id}/reestimate (If-Match) — P05b '다시 추정'"""
-
-    def post(self, request, plan_id, task_id):
-        plan = _own_plan(request, plan_id)
-        revision = services.parse_if_match(request.headers.get("If-Match"))
-        return _plan_response(services.reestimate_funnel(plan.pk, revision, task_id))
-
-
 class PlanConfirmationView(BaseAPIView):
     """POST /api/v1/plans/{id}/confirmations  {revision} — P05c 확정 → P06 페르소나 생성"""
 

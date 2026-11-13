@@ -11,7 +11,6 @@ AGE_OPTIONS = {"any": "전체", "20s": "20대", "30s": "30대", "40s": "40대", 
 TEXT_LIMIT = 500           # 타겟 설명·추가 메모 (API_SPEC 4.2와 같은 500자)
 CUSTOM_TASK_LIMIT = 5
 CUSTOM_TASK_TEXT_LIMIT = 100
-STAGE_NAME_LIMIT = 20
 
 # Figma P05b: 세그먼트 4개 × 5명 = 20명
 SEGMENT_IDS = ["segment_1", "segment_2", "segment_3", "segment_4"]
@@ -38,29 +37,12 @@ LIMIT_RANGES = {  # (최소, 최대, 정수만)
     "timeout_seconds": (30, 600, True),
 }
 
-# 과업별 초기 퍼널. 단계 key는 agent/frustration.py STAGES의 단계 이름과 같게 둬서
-# 실행 이벤트의 funnel_step과 1:1로 맞춘다. 데모 쇼핑몰 경로를 보고 정한 초기 추정값이다.
-# (Figma 예시 7단계 랜딩·탐색·상세·장바구니·가입·결제 정보·완료와 단계 수가 다름)
-DEFAULT_FUNNEL_KEYS = {
-    "order": ["landing", "product", "cart", "signup", "checkout", "complete"],
-    "cart": ["landing", "product", "cart"],
-    "delivery": ["landing", "delivery", "complete"],
-    "coupon": ["landing", "benefits", "coupon", "cart", "checkout", "complete"],
-    "benefit": ["landing", "benefits", "coupon"],
-    "subscription": ["landing", "account", "subscription", "complete"],
-}
-
-
-def stage_names():
-    from agent.persona_report import STAGES
-    return STAGES
-
-
+# 퍼널: Figma P05c "사이트 분석으로 자동 결정 · 과업별 7단계". 위저드에서 편집하지 않는다.
+# 단계는 에이전트(agent/funnel.py)가 화면 경로로 정하는 7단계와 같다.
 def default_funnel(task_id):
-    names = stage_names()
-    keys = DEFAULT_FUNNEL_KEYS.get(task_id, ["landing", "complete"])
-    return {"task_id": task_id,
-            "stages": [{"id": f"stage_{k}", "name": names.get(k, k), "order": i} for i, k in enumerate(keys)]}
+    from agent.funnel import FUNNEL
+    return {"task_id": task_id, "auto": True,
+            "stages": [{"id": f"stage_{key}", "name": name, "order": i} for i, (key, name) in enumerate(FUNNEL)]}
 
 
 def capabilities():
@@ -71,5 +53,4 @@ def capabilities():
         "persona_total": PERSONA_TOTAL,
         "limits": {k: {"min": lo, "max": hi} for k, (lo, hi, _) in LIMIT_RANGES.items()},
         "custom_task_limit": CUSTOM_TASK_LIMIT,
-        "stage_name_limit": STAGE_NAME_LIMIT,
     }

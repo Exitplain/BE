@@ -26,9 +26,9 @@ class TestPlan(models.Model):
     ages = models.JSONField(default=list)
 
     # 3. 퍼널·페르소나
-    task_funnels = models.JSONField(default=list)     # [{task_id, stages: [{id, name, order}]}]
+    task_funnels = models.JSONField(default=list)     # 자동 7단계 (편집 없음). DB 칸은 마이그레이션 없이 남겨 둔다
     segments = models.JSONField(default=list)         # [{id: "segment_1", count: 5}, ...]
-    frustration_enabled = models.BooleanField(default=True)
+    frustration_enabled = models.BooleanField(default=True)   # Figma에서 토글이 빠져 항상 True
     limits = models.JSONField(default=dict)
 
     created_at = models.DateTimeField(auto_now_add=True)

@@ -26,18 +26,6 @@ class AudienceSerializer(StrictSerializer):
                                  required=False, allow_empty=True)
 
 
-class StageSerializer(StrictSerializer):
-    id = serializers.CharField(max_length=40)
-    name = serializers.CharField(max_length=catalog.STAGE_NAME_LIMIT,
-                                 error_messages={"blank": "단계 이름을 입력해주세요."})
-    order = serializers.IntegerField(min_value=0)
-
-
-class TaskFunnelSerializer(StrictSerializer):
-    task_id = serializers.CharField(max_length=40)
-    stages = StageSerializer(many=True)
-
-
 class SegmentSerializer(StrictSerializer):
     id = serializers.ChoiceField(choices=catalog.SEGMENT_IDS)
     count = serializers.IntegerField(min_value=1, error_messages={"min_value": "세그먼트마다 1명 이상 넣어주세요."})
@@ -63,7 +51,8 @@ class LimitsSerializer(StrictSerializer):
 
 
 class PlanPatchSerializer(StrictSerializer):
-    """PATCH /plans/{id}. 보낸 필드만 바꾼다(모든 최상위 필드 선택). 2단계 필드와 3단계 필드를 따로 보내도 된다."""
+    """PATCH /plans/{id}. 보낸 필드만 바꾼다(모든 최상위 필드 선택). 2단계 필드와 3단계 필드를 따로 보내도 된다.
+    퍼널(task_funnels)과 이탈 판정 토글(frustration_enabled)은 Figma에서 빠져서 받지 않는다 (보내면 422)."""
     task_ids = serializers.ListField(child=serializers.CharField(max_length=40), allow_empty=False, required=False,
                                      error_messages={"empty": "과업을 한 개 이상 골라주세요."})
     custom_tasks = serializers.ListField(
@@ -71,9 +60,7 @@ class PlanPatchSerializer(StrictSerializer):
         max_length=catalog.CUSTOM_TASK_LIMIT, required=False)
     additional_request = serializers.CharField(max_length=catalog.TEXT_LIMIT, allow_blank=True, required=False)
     audience = AudienceSerializer(required=False)
-    task_funnels = TaskFunnelSerializer(many=True, required=False)
     segments = SegmentSerializer(many=True, required=False)
-    frustration_enabled = serializers.BooleanField(required=False)
     limits = LimitsSerializer(required=False)
     # partial=True를 쓰지 않는다: 쓰면 중첩 필드의 필수 검사까지 꺼진다
 
