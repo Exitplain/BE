@@ -153,6 +153,9 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             action, usage = await policy.decide(obs, persona, config.goal, history)
                             state["input"] += usage.get("input_tokens", 0)
                             state["output"] += usage.get("output_tokens", 0)
+                            if config.max_tokens_per_session and state["input"] + state["output"] >= config.max_tokens_per_session:
+                                state.update(status="budget_exceeded", reason="Token budget reached")   # 비용 상한
+                                return
                             if action.kind == "stop":
                                 state.update(status="agent_failure", reason="Policy stopped without verified completion")
                                 return

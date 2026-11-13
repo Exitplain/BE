@@ -30,7 +30,9 @@ class RunInput(StrictModel):
     personas: list[Persona] = Field(min_length=1, max_length=20)
     max_steps: int = Field(default=20, ge=1, le=100)
     timeout_seconds: float = Field(default=120, gt=0, le=600)
-    concurrency: int = Field(default=2, ge=1, le=4)
+    concurrency: int = Field(default=2, ge=1, le=5)    # 동시 실행 (위저드 기본 5)
+    # 세션 하나가 쓸 수 있는 모델 토큰(입력+출력) 상한. 넘으면 budget_exceeded로 멈춘다. None이면 제한 없음
+    max_tokens_per_session: int | None = Field(default=None, ge=1)
     # 시드: 같은 시드면 같은 결과, 시드가 다르면 페르소나 반응이 조금씩 달라진다 (리포트의 시드 범위 표시용)
     seed: int = Field(default=0, ge=0, le=1_000_000)
     # 브라우저 화면 크기 (모바일 390). 기존과 같게 기본값은 1000×800
