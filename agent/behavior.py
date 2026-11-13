@@ -19,8 +19,11 @@
 - accessibility 접근성 장벽: 이름 없는 입력칸, 모바일에서 24px보다 작은 버튼이 2개 이상 (숙련도 낮을수록)
 모든 수치가 50(기본값)이고 seed가 0이면 예전 규칙(필수 입력 초과 시 +70, 임계치 60)과 같은 결과가 나온다.
 
-seed: 0이면 흔들림 없음. 1 이상이면 (seed, 페르소나 ID)로 정해지는 난수로 임계치와 가중치를
-±15% 흔든다. 같은 seed면 항상 같은 결과, seed가 다르면 경계에 있는 페르소나의 결과가 달라진다.
+seed: 0이면 흔들림 없음. 1 이상이면 (seed, 페르소나 ID)로 정해지는 난수로
+1) 수치 4개를 원래 값 중심으로 다시 뽑고 (표준편차 12, 같은 세그먼트 안의 개인차)
+2) 임계치와 가중치를 ±15% 흔든다.
+같은 seed면 항상 같은 결과, seed가 다르면 경계에 있는 페르소나의 결과가 달라진다.
+문제가 아주 크면(예: 필수 입력이 허용치를 크게 넘음) 시드가 달라도 모두 이탈할 수 있다. 이건 정상이다.
 """
 import random
 import re
@@ -32,6 +35,8 @@ WEIGHTS = {"input_burden": 70.0, "cost": 40.0, "navigation": 10.0, "revisit": 8.
            "value": 20.0, "trust": 30.0, "technical": 15.0, "accessibility": 20.0}
 PROGRESS_REWARD = 4.0
 JITTER = 0.15
+VARIABLE_SD = 12
+VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
 EARLY_STAGES = {"landing", "browse", "detail"}
 LATE_STAGES = {"cart", "signup", "payment"}
 WANDER_ACTIONS = {"scroll", "back", "wait", "reload"}
@@ -46,11 +51,21 @@ SMALL_TARGET_PX = 24
 def factor(value):
     return 0.5 + value / 100
 
+def sample_persona(persona, rng):
+    """같은 세그먼트 안에서도 사람마다 조금씩 다르다: 수치 4개를 평균 그대로, 표준편차 VARIABLE_SD로 뽑는다."""
+    def draw(value):
+        return min(100, max(0, round(rng.gauss(value, VARIABLE_SD))))
+    return persona.model_copy(update={k: draw(getattr(persona, k)) for k in VARIABLE_KEYS})
+
 
 class PersonaMeter:
     def __init__(self, persona, seed=0):
         rng = random.Random(f"{seed}:{persona.id}")
         jitter = (lambda: 1.0) if seed == 0 else (lambda: rng.uniform(1 - JITTER, 1 + JITTER))
+        if seed:
+            persona = sample_persona(persona, rng)
+        self.variables = {k: getattr(persona, k) for k in VARIABLE_KEYS}   # 이번 시드에서 실제로 쓴 수치
+
         self.threshold = round(persona.frustration_threshold * factor(persona.patience) * jitter(), 3)
         self.required_limit = persona.max_required_fields
         wander = factor(100 - persona.digital_literacy)

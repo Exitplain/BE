@@ -58,7 +58,7 @@ def test_seed_zero_is_fixed_and_seeds_vary():
     assert PersonaMeter(persona, 0).threshold == 60
     assert PersonaMeter(persona, 3).threshold == PersonaMeter(persona, 3).threshold      # 같은 시드 → 같은 값
     thresholds = {PersonaMeter(persona, s).threshold for s in range(1, 6)}
-    assert len(thresholds) > 1 and all(51 <= t <= 69 for t in thresholds)
+    assert len(thresholds) > 1 and all(30 <= t <= 90 for t in thresholds)
     # 경계에 있는 페르소나는 시드에 따라 이탈 여부가 갈린다
     edge = Persona(id="edge", frustration_threshold=66)
     outcomes = {drop_step(edge, seed) for seed in range(1, 20)}
@@ -117,3 +117,25 @@ def test_each_cause_counted_once_and_primary_cause():
     first = meter.observe("signup", 0, elements=[field("생년월일")])
     assert first["signals"] == {"trust": 45.0} and first["crossed"] and meter.primary_cause() == "trust"
     assert meter.observe("signup", 0, elements=[field("생년월일")])["signals"] == {}
+
+
+
+def test_seed_samples_individual_variables():
+    persona = Persona(id="p1", patience=50, digital_literacy=50, price_sensitivity=50, trust_need=50)
+    assert PersonaMeter(persona, 0).variables == {k: 50 for k in PersonaMeter(persona, 0).variables}
+    one, again, two = PersonaMeter(persona, 1), PersonaMeter(persona, 1), PersonaMeter(persona, 2)
+    assert one.variables == again.variables and one.variables != two.variables
+    assert all(0 <= v <= 100 for v in one.variables.values())
+
+
+def test_borderline_population_varies_by_seed():
+    personas = [Persona(id=f"P-{i:03d}", price_sensitivity=80, patience=30) for i in range(20)]
+    def dropouts(seed):
+        count = 0
+        for p in personas:
+            meter = PersonaMeter(p, seed)
+            meter.observe("detail", 0, "12,900원")
+            count += meter.observe("payment", 0, "배송비 3,500원이 추가됩니다.")["crossed"]
+        return count
+    counts = [dropouts(seed) for seed in (1, 2, 3)]
+    assert len(set(counts)) > 1 and all(0 < c < 20 for c in counts)     # 리포트에 범위가 생김
