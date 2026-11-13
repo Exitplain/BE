@@ -17,9 +17,9 @@ class TaskRunInline(admin.TabularInline):
 
 @admin.register(Run)
 class RunAdmin(admin.ModelAdmin):
-    list_display = ("sequence_no", "project", "kind", "status", "created_by", "created_at", "finished_at")
+    list_display = ("sequence_no", "name", "project", "kind", "status", "created_by", "created_at", "finished_at")
     list_filter = ("status", "kind")
-    search_fields = ("id", "project__name")
+    search_fields = ("id", "name", "project__name")
     raw_id_fields = ("project", "created_by", "parent_run", "plan_snapshot")
     readonly_fields = ("id", "created_at")
     inlines = [TaskRunInline]

@@ -12,6 +12,8 @@ from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
+from .naming import build_run_name
+
 
 class Run(models.Model):
     """한 번의 테스트 실행. 확정된 계획(PlanSnapshot)을 그대로 따른다."""
@@ -38,6 +40,7 @@ class Run(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     sequence_no = models.PositiveIntegerField()  # 프로젝트 안에서 1부터 (진단 기록 번호)
     kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.PRETEST)
+    name = models.CharField(max_length=120, blank=True, default="")  # "4차·첫 주문 완료 외 1개". 비우면 저장할 때 만든다
     parent_run = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children")
     change_note = models.TextField(blank=True, default="")  # 재테스트: 무엇을 고쳤는지
 
@@ -69,6 +72,13 @@ class Run(models.Model):
 
     def __str__(self):
         return f"Run #{self.sequence_no} ({self.project_id}) {self.status}"
+
+    def save(self, *args, **kwargs):
+        if not self.name and self.plan_snapshot_id:
+            self.name = build_run_name(self.sequence_no, self.kind, self.plan_snapshot.data)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = {*kwargs["update_fields"], "name"}
+        super().save(*args, **kwargs)
 
     @property
     def is_active(self):

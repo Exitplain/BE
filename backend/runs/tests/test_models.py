@@ -7,7 +7,7 @@ from django.test import TestCase
 from agent.schemas import Terminal
 from runs.models import Observation, Run, RunEvent, Session, TaskRun
 
-from .factories import (RunsFixtureMixin, make_event, make_observation, make_persona, make_project, make_run,
+from .factories import (RunsFixtureMixin, make_event, make_observation, make_project, make_run,
                         make_session, make_snapshot, make_task_run, make_user)
 
 
