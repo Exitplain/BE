@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 import os
+import sys
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -158,3 +159,20 @@ EXITPLAIN_LOGIN_CODE_MAX_ATTEMPTS = 5
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Exitplain <no-reply@exitplain.local>')
 # Google 로그인: Google Cloud Console에서 발급한 OAuth 클라이언트 ID (프론트와 같은 값)
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
+# --- 백엔드 A: 실행 (runs) ---
+# 스크린샷·events.jsonl 저장 위치. 커밋 금지(artifacts/ 는 .gitignore 대상)
+ARTIFACT_ROOT = os.environ.get('ARTIFACT_ROOT', str(BASE_DIR / 'artifacts'))
+# 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
+AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
+# scripted 는 API 키가 필요 없다. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
+AGENT_POLICY = os.environ.get('AGENT_POLICY', 'scripted')
+AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
+# 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
+ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]
+# 프로젝트마다 동시에 진행할 수 있는 실행 수 (0 이면 제한 없음)
+EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT = int(os.environ.get('EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT', 1))
+# 워커 한 대가 동시에 띄울 에이전트 프로세스 수. t3.small(2GiB)에서는 1 을 권장
+EXITPLAIN_WORKER_PROCESSES = int(os.environ.get('EXITPLAIN_WORKER_PROCESSES', 1))
+# 실행이 모두 끝난 뒤 호출할 집계 함수의 경로("앱.모듈:함수"). B의 리포트 집계 함수가 정해지면 연결한다. None 이면 건너뜀
+EXITPLAIN_FINALIZE_HOOK = os.environ.get('EXITPLAIN_FINALIZE_HOOK') or None
