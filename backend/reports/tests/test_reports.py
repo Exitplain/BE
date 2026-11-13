@@ -15,7 +15,8 @@ from reports.models import ReportSnapshot
 from reports.services import create_report_from_run_dir
 from reports.tests.sample_runs import ORDER_PATHS, write_attempt
 
-DROP_AT_SIGNUP = ("simulated_dropout", ["/", "/product", "/cart", "/signup"])
+DROP_AT_SIGNUP = ("simulated_dropout", ["/", "/product", "/cart", "/signup"], "input_burden")
+DROP_AT_PAYMENT = ("simulated_dropout", ["/", "/product", "/cart", "/signup", "/checkout"], "cost")
 REVISIT = ("success", ["/", "/product", "/", "/product", "/cart", "/signup", "/checkout", "/order/success"])
 TECH = ("agent_failure", ["/", "/product"])
 
@@ -49,13 +50,17 @@ class ReportTests(WizardMixin, TestCase):
         self.assertEqual((task["success"], task["dropout"], task["technical"]), (18, 1, 1))
         self.assertEqual(task["valid_sessions"], 19)                     # 기술 실패 제외
         self.assertEqual(task["achievement_rate"], round(18 / 19, 4))
-        funnel = {s["stage_id"]: s for s in task["funnel"]}
-        self.assertEqual(funnel["stage_landing"]["reached"], 19)         # 재방문해도 1번
-        self.assertEqual(funnel["stage_product"]["reached"], 19)
-        self.assertEqual(funnel["stage_signup"]["reached"], 19)
-        self.assertEqual(funnel["stage_checkout"]["reached"], 18)
-        self.assertEqual(funnel["stage_signup"]["dropouts_here"], 1)
-        self.assertEqual(funnel["stage_checkout"]["rate_of_previous"], round(18 / 19, 4))
+        self.assertEqual([s["name"] for s in task["funnel"]],
+                         ["랜딩", "탐색", "상세", "장바구니", "가입", "결제 정보", "완료"])   # Figma P12 7단계
+        funnel = {s["key"]: s for s in task["funnel"]}
+        self.assertEqual(funnel["landing"]["reached"], 19)               # 재방문해도 1번
+        self.assertEqual(funnel["browse"]["reached"], 0)                 # 데모 경로에 탐색 화면 없음
+        self.assertEqual(funnel["detail"]["reached"], 19)
+        self.assertEqual(funnel["signup"]["reached"], 19)
+        self.assertEqual(funnel["payment"]["reached"], 18)
+        self.assertEqual(funnel["signup"]["dropouts_here"], 1)
+        self.assertEqual(funnel["payment"]["rate_of_previous"], round(18 / 19, 4))
+        self.assertEqual(funnel["detail"]["rate_of_previous"], 1.0)      # 지나가지 않은 탐색은 건너뛰고 랜딩과 비교
         self.assertEqual(data["technical_failures"][0]["persona_id"], "P-003")
         self.assertEqual(data["status"], "final")
 
@@ -77,15 +82,41 @@ class ReportTests(WizardMixin, TestCase):
         self.assertEqual((seg1["segment_id"], seg1["name"], seg1["achievement_rate"]),
                          ("segment_1", "빠른 구매형", 0.0))
 
-    def test_custom_funnel_order_and_names_follow_snapshot(self, _):
-        plan = self.patch(self.create_plan(), {**self.STEP2, "task_ids": ["order"]}).json()
-        funnels = plan["task_funnels"]
-        funnels[0]["stages"][0]["name"] = "첫 화면"
-        plan = self.patch(plan, {"task_funnels": funnels, "limits": {"seed_count": 1}}).json()
-        snap = PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
-        self.write_all(snap)
-        data = build_report_data(snap.data, sources.load_from_run_dir(self.root))
-        self.assertEqual(data["tasks"][0]["funnel"][0]["name"], "첫 화면")
+    def test_causes_top3_and_heatmap(self, _):
+        snap = self.snapshot()
+        outcomes = {**{f"P-{i:03d}": DROP_AT_SIGNUP for i in (1, 2, 3)},     # 세그먼트 1: 가입에서 입력 부담
+                    **{f"P-{i:03d}": DROP_AT_PAYMENT for i in (6, 7)},       # 세그먼트 2: 결제에서 비용 충격
+                    "P-011": ("simulated_dropout", ["/", "/product"])}        # 주 원인 기록 없음
+        self.write_all(snap, outcomes)
+        task = build_report_data(snap.data, sources.load_from_run_dir(self.root))["tasks"][0]
+        self.assertEqual([(c["name"], c["dropouts"]) for c in task["top_causes"]],
+                         [("입력 부담", 3), ("비용 충격", 2), ("원인 미상", 1)])
+        self.assertEqual(task["causes"][0]["share"], 0.5)
+        rows = {r["segment_id"]: r["dropouts"] for r in task["heatmap"]["rows"]}
+        stages = task["heatmap"]["stages"]
+        self.assertEqual(rows["segment_1"][stages.index("signup")], 3)
+        self.assertEqual(rows["segment_2"][stages.index("payment")], 2)
+        self.assertEqual(rows["segment_3"][stages.index("detail")], 1)
+        self.assertEqual(task["kpis"]["median_steps"], 6)
+
+    def test_seed_ranges(self, _):
+        snap = self.snapshot(seed_count=3)
+        drops = [{}, {"P-001": DROP_AT_SIGNUP}, {f"P-{i:03d}": DROP_AT_SIGNUP for i in (1, 2, 3)}]
+        for seed, outcomes in enumerate(drops, 1):
+            write_attempt(self.root, build_run_input(snap, run_id="run1", task_id="order", seed=seed), outcomes)
+        task = build_report_data(snap.data, sources.load_from_run_dir(self.root))["tasks"][0]
+        self.assertEqual(task["seed_ranges"]["success"], {"min": 17, "max": 20})     # 완료 17~20명
+        self.assertEqual(task["seed_ranges"]["dropout"], {"min": 0, "max": 3})
+        self.assertEqual((task["success"], task["dropout"]), (56, 4))                   # 합계는 시드 3번을 더한 값
+        complete = next(s for s in task["funnel"] if s["key"] == "complete")
+        self.assertEqual(complete["reached_range"], {"min": 17, "max": 20})
+
+    def test_old_events_without_stage_use_paths(self, _):
+        snap = self.snapshot()
+        for item in build_run_inputs(snap, run_id="run1"):
+            write_attempt(self.root, item, {"P-001": DROP_AT_SIGNUP}, with_stage=False)
+        task = build_report_data(snap.data, sources.load_from_run_dir(self.root))["tasks"][0]
+        self.assertEqual(next(s for s in task["funnel"] if s["key"] == "signup")["dropouts_here"], 1)
 
     # --- 파일 읽기 ---
     def test_source_errors(self, _):
