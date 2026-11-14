@@ -140,8 +140,10 @@ class Session(models.Model):
     # agent.schemas.Terminal 과 같아야 한다 (tests 가 비교한다)
     TERMINAL_STATUSES = (Status.SUCCESS, Status.SIMULATED_DROPOUT, Status.AGENT_FAILURE, Status.SITE_FAILURE,
                          Status.BLOCKED_AUTH, Status.BUDGET_EXCEEDED, Status.CANCELLED)
-    # 앞의 3개를 뺀 4개는 사이트·환경 문제라 이탈률 분모에서 제외한다.
-    TECHNICAL_STATUSES = (Status.SITE_FAILURE, Status.BLOCKED_AUTH, Status.BUDGET_EXCEEDED, Status.CANCELLED)
+    # 성공·이탈을 뺀 5개는 에이전트·사이트·환경 문제라 이탈률 분모에서 제외한다.
+    # agent.persona_report.TECHNICAL, reports.aggregate 와 같아야 한다 (tests 가 비교한다)
+    TECHNICAL_STATUSES = (Status.AGENT_FAILURE, Status.SITE_FAILURE, Status.BLOCKED_AUTH, Status.BUDGET_EXCEEDED,
+                          Status.CANCELLED)
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="sessions")  # task_run.run 과 같은 값
     task_run = models.ForeignKey(TaskRun, on_delete=models.CASCADE, related_name="sessions")
