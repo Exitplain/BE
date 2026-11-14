@@ -198,8 +198,8 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
                  or str(BASE_DIR.parent / 'artifacts'))
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
-# scripted 는 API 키가 필요 없다. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
-AGENT_POLICY = os.environ.get('AGENT_POLICY', 'scripted')
+# shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
+AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
 AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
 # 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
 ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]
