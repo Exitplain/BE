@@ -32,10 +32,17 @@ def write_attempt(root, run_input, outcomes, default=("success", ORDER_PATHS), w
         cause = rest[0] if rest else None
         emit("session.started", sid, {"persona": persona})
         for i, path in enumerate(paths):
-            payload = {"step_id": f"step_{i:03d}", "url": f"http://shop.local:8080{path}"}
+            step_id = f"step_{i:03d}"
+            payload = {"step_id": step_id, "url": f"http://shop.local:8080{path}"}
             if with_stage:
-                payload["stage"] = funnel_stage(path, run_input["success_path"])
+                payload.update(stage=funnel_stage(path, run_input["success_path"]),
+                               frustration_score=10.0 * i, frustration_threshold=60.0)
             emit("observation.created", sid, payload)
+            if cause and status == "simulated_dropout" and i == len(paths) - 1:
+                emit("friction.detected", sid, {"category": cause, "evidence_step_ids": [step_id], "contribution": 70.0})
+            if i < len(paths) - 1:
+                emit("action.completed", sid, {"step_id": step_id,
+                                            "action": {"kind": "click", "target_id": f"e{i}", "explanation": "다음으로"}})
         if status != "incomplete":
             issues = [{"category": cause, "primary": status == "simulated_dropout"}] if cause else []
             emit("session.finished", sid, {"status": status, "reason": f"{status} 사유", "steps": len(paths),

@@ -165,6 +165,15 @@ def _task_report(task, group, personas, seeds, technical, segment_of):
         "data_quality": {"unknown_stages": unknown_stage},
     }, technical_failures
 
+def session_row(r, technical, segment_of):
+    """세션 1개를 목록 한 줄로. 세션 상세 API의 주소(task_id, seed, persona_id)가 그대로 들어 있다."""
+    segment_id, segment_name = segment_of.get(r["persona_id"], ("unknown", "알 수 없음"))
+    stages = r.get("stages") or []
+    return {"task_id": r["task_id"], "seed": r["seed"], "persona_id": r["persona_id"],
+            "segment_id": segment_id, "segment_name": segment_name,
+            "status": r["status"], "kind": classify(r["status"], technical),
+            "terminal_stage": stages[-1] if stages else None, "primary_cause": r.get("primary_cause"),
+            "steps": r.get("steps", 0), "duration_seconds": r.get("duration_seconds")}
 
 def build_report_data(snapshot_data, records):
     technical = technical_statuses()
@@ -182,9 +191,11 @@ def build_report_data(snapshot_data, records):
         tasks.append(report)
         technical_failures.extend(failures)
         totals.update({k: report[k] for k in ("expected_sessions", "recorded_sessions", "success", "dropout",
-                                              "technical", "incomplete", "valid_sessions")})
+                                            "technical", "incomplete", "valid_sessions")})
 
     ignored = sum(1 for r in records if r["task_id"] not in tasks_by_id)  # 확정하지 않은 과업의 기록
+    sessions = [session_row(r, technical, segment_of) for r in records if r["task_id"] in tasks_by_id]
+    sessions.sort(key=lambda r: (list(tasks_by_id).index(r["task_id"]), r["seed"], r["persona_id"]))
     status = "final" if totals["incomplete"] == 0 else "partial"
     return {
         "schema_version": SCHEMA_VERSION,
@@ -192,6 +203,7 @@ def build_report_data(snapshot_data, records):
         "summary": {**dict(totals), "achievement_rate": _rate(totals["success"], totals["valid_sessions"])},
         "tasks": tasks,
         "technical_failures": technical_failures,
+        "sessions": sessions,      # 세션 목록 (진단 기록·세션 상세로 들어가는 표)
         "ignored_records": ignored,
         "persona_generator": snapshot_data.get("persona_generator"),
         "notes": [
