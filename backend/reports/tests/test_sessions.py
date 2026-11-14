@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from common.testing import WizardMixin, fake_discovery
 from plans.models import PlanSnapshot
 from plans.run_input import build_run_inputs
+from reports import services
 from reports.services import create_report_from_run_dir
 from reports.tests.sample_runs import write_attempt
 
@@ -86,11 +87,12 @@ class SessionApiTests(WizardMixin, TestCase):
         self.make_report("run2", outcomes={f"P-{i:03d}": DROP for i in range(1, 6)})
         create_report_from_run_dir(first.plan_snapshot, self.root, run_ref="run1", user=self.user)   # run1 재집계
 
-        res = self.client.get(f"/api/v1/projects/{self.project.id}/reports").json()
-        self.assertEqual(res["count"], 2)                                   # 실행마다 최신 revision 1개
-        self.assertEqual(res["items"][0]["run_ref"], "run1")
-        self.assertEqual(res["items"][0]["revision"], 2)
-        self.assertEqual(res["items"][1]["top_causes"], [{"key": "input_burden", "name": "입력 부담", "dropouts": 5}])
+        # 진단 기록 목록 API는 A의 /projects/{id}/runs로 합쳤다. 목록에 넣을 요약(report_summary)과 묶는 규칙은 여기서 확인
+        items = [services.report_summary(r) for r in services.project_reports(self.project)]
+        self.assertEqual(len(items), 2)                                     # 실행마다 최신 revision 1개
+        self.assertEqual((items[0]["run_ref"], items[0]["revision"]), ("run1", 2))
+        self.assertEqual(items[1]["top_causes"], [{"key": "input_burden", "name": "입력 부담", "dropouts": 5}])
+        self.assertEqual(self.client.get(f"/api/v1/projects/{self.project.id}/reports").status_code, 404)
 
         dash = self.client.get(f"/api/v1/projects/{self.project.id}/dashboard").json()
         self.assertEqual(dash["runs"], 2)

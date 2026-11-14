@@ -1,11 +1,16 @@
+import secrets
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Max
+from django.utils import timezone
 
 from common.exceptions import ApiError
 
 from . import sessions as session_files
 from . import sources
 from .aggregate import build_report_data
+from .models import ReportSnapshot, ShareLink
 from .models import ReportSnapshot
 
 
@@ -142,3 +147,46 @@ def dashboard(project, trend_size=10):
             "latest": report_summary(latest) if latest else None,
             "trend": trend,
             "recent": [report_summary(r) for r in reports[:5]]}
+
+
+
+# ---------- 공유 링크 (11/17) ----------
+
+SHARE_DAYS_DEFAULT, SHARE_DAYS_MAX = 7, 30
+
+
+def create_share_link(report, user, days=SHARE_DAYS_DEFAULT):
+    return ShareLink.objects.create(report=report, created_by=user, token=secrets.token_urlsafe(24),
+                                    expires_at=timezone.now() + timedelta(days=days))
+
+
+def share_link_dict(link):
+    now = timezone.now()
+    state = "revoked" if link.revoked_at else ("expired" if link.expires_at <= now else "active")
+    return {"id": str(link.id), "report_id": str(link.report_id), "token": link.token,
+            "path": f"/api/v1/shared/{link.token}", "state": state,
+            "created_at": link.created_at.isoformat(), "expires_at": link.expires_at.isoformat(),
+            "revoked_at": link.revoked_at.isoformat() if link.revoked_at else None}
+
+
+def revoke_share_link(link):
+    if link.revoked_at is None:
+        link.revoked_at = timezone.now()
+        link.save(update_fields=["revoked_at"])
+    return link
+
+
+def shared_report(token):
+    """로그인 없이 보는 리포트. 없거나 취소된 링크는 404, 만료된 링크는 410."""
+    link = ShareLink.objects.select_related("report__plan_snapshot__plan__project", "report__run").filter(
+        token=token).first()
+    if link is None or link.revoked_at is not None:
+        raise ApiError(404, "NOT_FOUND", "공유 링크를 찾을 수 없습니다.")
+    if link.expires_at <= timezone.now():
+        raise ApiError(410, "SHARE_LINK_EXPIRED", "공유 기간이 끝난 링크입니다.")
+    report = link.report
+    project = report.plan_snapshot.plan.project
+    body = report_dict(report)
+    return {**body, "shared": True, "expires_at": link.expires_at.isoformat(),
+            "project": {"name": getattr(project, "name", "")},
+            "run": {"name": report.run.name if report.run else report.run_ref}}

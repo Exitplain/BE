@@ -36,3 +36,21 @@ class ReportSnapshot(models.Model):
         ordering = ["-created_at"]
         constraints = [models.UniqueConstraint(fields=["run_ref", "revision"], name="uniq_report_revision")]
         indexes = [models.Index(fields=["run_ref", "-revision"])]
+
+        
+
+class ShareLink(models.Model):
+    """리포트 공유 링크 (11/17, Should). 링크를 가진 사람은 로그인 없이 리포트를 볼 수 있다.
+
+    token은 추측할 수 없는 임의 문자열(secrets.token_urlsafe). 만료되거나 취소하면 더 이상 열리지 않는다.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    report = models.ForeignKey(ReportSnapshot, on_delete=models.CASCADE, related_name="share_links")
+    token = models.CharField(max_length=64, unique=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
