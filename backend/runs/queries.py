@@ -71,6 +71,7 @@ def _session_item(session):
         "persona": {"code": persona.code, "segment_id": persona.segment_id, "segment_name": persona.segment_name},
         "task_id": session.task_id, "seed": session.seed, "status": session.status, "reason": session.reason,
         "steps": session.steps, "duration_seconds": session.duration_seconds, "max_frustration": session.max_frustration,
+        "terminal_stage": session.terminal_stage, "stages_reached": session.stages_reached,
         "latest_observation": latest,
         "final_screenshot_url": final_screenshot_url(session.pk) if session.final_screenshot else None,
         "started_at": _iso(session.started_at), "finished_at": _iso(session.finished_at),

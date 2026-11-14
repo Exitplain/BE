@@ -62,9 +62,34 @@ class ImportEventsTests(ImporterBase):
         self.assertEqual((first.steps, first.model_calls, first.policy), (3, 0, "scripted_fixture"))
         self.assertEqual(first.max_frustration, 70)
         self.assertEqual(first.issues[0]["category"], "input_burden")
+        self.assertTrue(first.issues[0]["primary"])  # 이탈을 일으킨 주 원인 표시가 그대로 남는다
+        self.assertEqual((first.terminal_stage, first.stages_reached), ("detail", ["landing", "browse", "detail"]))
         self.assertIsNotNone(first.started_at)
         self.assertIsNotNone(first.finished_at)
         self.assertEqual(self.task_run.events_offset, self.events_path().stat().st_size)
+
+    def test_observations_keep_funnel_stage_and_frustration(self):
+        self.run_fake_agent()
+        importer.import_new_events(self.task_run)
+        shots = list(Observation.objects.filter(session__session_key="session_P-001").order_by("step"))
+        self.assertEqual([o.stage for o in shots], ["landing", "browse", "detail"])
+        self.assertEqual([o.frustration_score for o in shots], [0.0, 20.0, 40.0])
+        self.assertEqual({o.frustration_threshold for o in shots}, {60.0})
+
+    def test_old_events_without_new_fields_still_import(self):
+        self.run_fake_agent()
+        lines = []
+        for line in self.events_path().read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            for key in ("stage", "frustration_score", "frustration_threshold", "terminal_stage", "stages_reached"):
+                event["payload"].pop(key, None)
+            lines.append(json.dumps(event, ensure_ascii=False))
+        self.events_path().write_text("\n".join(lines) + "\n", encoding="utf-8")
+        importer.import_new_events(self.task_run)
+        shot = Observation.objects.filter(session__session_key="session_P-001").first()
+        self.assertEqual((shot.stage, shot.frustration_score, shot.frustration_threshold), ("", None, None))
+        session = Session.objects.get(session_key="session_P-001")
+        self.assertEqual((session.terminal_stage, session.stages_reached), ("", []))
 
     def test_observations_keep_order_url_and_relative_artifact_path(self):
         self.run_fake_agent()

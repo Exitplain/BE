@@ -90,16 +90,28 @@ def _on_observation(session, payload, when):
     Observation.objects.get_or_create(session=session, step=step, defaults={
         "step_id": step_id[:20], "url": str(payload.get("url") or "")[:1000],
         "artifact": relative_artifact(payload.get("artifact")), "required_fields": int(payload.get("required_fields") or 0),
-        "text": str(payload.get("text") or ""), "occurred_at": when})
+        "text": str(payload.get("text") or ""), "stage": str(payload.get("stage") or "")[:40],
+        "frustration_score": _number(payload.get("frustration_score")),
+        "frustration_threshold": _number(payload.get("frustration_threshold")), "occurred_at": when})
+    changed = []
     if not session.is_terminal and session.steps < step + 1:
-        session.steps = step + 1
-        session.save(update_fields=["steps"])
+        session.steps, changed = step + 1, ["steps"]
+    score = _number(payload.get("frustration_score"))
+    if score is not None and score > session.max_frustration:
+        session.max_frustration = score
+        changed.append("max_frustration")
+    if changed:
+        session.save(update_fields=changed)
+
+
+def _number(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _on_friction(session, payload):
-    score = payload.get("frustration_score")
-    if session is not None and isinstance(score, (int, float)) and score > session.max_frustration:
-        session.max_frustration = float(score)
+    score = _number(payload.get("frustration_score"))
+    if session is not None and score is not None and score > session.max_frustration:
+        session.max_frustration = score
         session.save(update_fields=["max_frustration"])
 
 
@@ -119,6 +131,9 @@ def _on_session_finished(session, payload, when):
     session.output_tokens = int(payload.get("output_tokens") or 0)
     session.issues = payload.get("issues") if isinstance(payload.get("issues"), list) else []
     session.final_screenshot = relative_artifact(payload.get("final_artifact"))
+    session.terminal_stage = str(payload.get("terminal_stage") or "")[:80]
+    stages = payload.get("stages_reached")
+    session.stages_reached = [str(s) for s in stages] if isinstance(stages, list) else []
     session.finished_at = when
     session.save()
 

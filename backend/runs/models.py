@@ -160,7 +160,8 @@ class Session(models.Model):
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
     terminal_stage = models.CharField(max_length=80, blank=True, default="")  # 마지막으로 도달한 퍼널 단계
-    max_frustration = models.FloatField(default=0)  # friction.detected 의 frustration_score 최댓값
+    stages_reached = models.JSONField(default=list, blank=True)  # 도달한 퍼널 단계 목록 (session.finished)
+    max_frustration = models.FloatField(default=0)  # observation/friction 이벤트의 frustration_score 최댓값
     issues = models.JSONField(default=list, blank=True)  # 에이전트 issue dict 를 그대로 저장
     final_screenshot = models.CharField(max_length=500, blank=True, default="")  # ARTIFACT_ROOT 기준 상대경로
 
@@ -190,6 +191,9 @@ class Observation(models.Model):
     artifact = models.CharField(max_length=500, blank=True, default="")  # ARTIFACT_ROOT 기준 상대경로
     required_fields = models.PositiveSmallIntegerField(default=0)
     text = models.TextField(blank=True, default="")  # think-aloud 에 쓰는 화면 텍스트
+    stage = models.CharField(max_length=40, blank=True, default="")  # 퍼널 7단계 중 이 화면의 단계
+    frustration_score = models.FloatField(null=True, blank=True)
+    frustration_threshold = models.FloatField(null=True, blank=True)
     occurred_at = models.DateTimeField()
 
     class Meta:

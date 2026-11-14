@@ -162,7 +162,9 @@ GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
 
 # --- 백엔드 A: 실행 (runs) ---
 # 스크린샷·events.jsonl 저장 위치. 커밋 금지(artifacts/ 는 .gitignore 대상)
-ARTIFACT_ROOT = os.environ.get('ARTIFACT_ROOT', str(BASE_DIR / 'artifacts'))
+# B 의 세션 상세는 EXITPLAIN_RUN_OUTPUT_DIR 에서 events.jsonl 을 읽으므로 같은 폴더를 쓴다 (기본 BE/artifacts)
+ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RUN_OUTPUT_DIR')
+                 or str(BASE_DIR.parent / 'artifacts'))
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # scripted 는 API 키가 필요 없다. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요

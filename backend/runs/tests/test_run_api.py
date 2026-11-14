@@ -400,3 +400,10 @@ class EndToEndTests(WizardMixin, TestCase):
         self.assertNotIn(tmp.name.replace("\\", "\\\\"), json.dumps(events))
         runs = self.client.get(f"/api/v1/projects/{self.project.pk}/runs").json()
         self.assertEqual([r["id"] for r in runs["items"]], [run_id])
+
+
+class TileStageFieldsTests(ApiBase):
+    def test_tile_exposes_funnel_stages(self):
+        self.session("P-001", status="success", terminal_stage="detail", stages_reached=["landing", "browse", "detail"])
+        item = self.client.get(f"/api/v1/runs/{self.run.id}/sessions").json()["items"][0]
+        self.assertEqual((item["terminal_stage"], item["stages_reached"]), ("detail", ["landing", "browse", "detail"]))

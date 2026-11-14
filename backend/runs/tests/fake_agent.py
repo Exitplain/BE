@@ -22,6 +22,7 @@ from pathlib import Path
 PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
        b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82")
 PATHS = ["/", "/product", "/cart"]
+STAGES = ["landing", "browse", "detail"]  # 에이전트 agent/funnel.py 의 단계 이름 중 일부 (모양만 같게)
 
 
 class Writer:
@@ -55,7 +56,8 @@ def observe(writer, sid, step, base_url):
     artifact = writer.screenshot(sid, f"{step_id}.png")
     writer.emit("observation.created", sid, {"step_id": step_id, "url": base_url.rstrip("/") + PATHS[step % 3],
                                               "artifact": artifact, "required_fields": 7 if step == 1 else 2,
-                                              "text": f"{step}번째 화면"})
+                                              "text": f"{step}번째 화면", "stage": STAGES[step % 3],
+                                              "frustration_score": 20.0 * step, "frustration_threshold": 60.0})
     return step_id, artifact
 
 
@@ -80,7 +82,7 @@ def run(config, output, mode):
             if step == 1:
                 issue = {"category": "input_burden", "summary": "Visible required fields exceed persona budget",
                          "evidence_step_ids": [step_id], "artifact": artifact, "observed_fields": 7,
-                         "configured_limit": 6}
+                         "configured_limit": 6, "primary": True}
                 issues.append(issue)
                 writer.emit("friction.detected", sid, {**issue, "frustration_score": 70})
             writer.emit("action.completed", sid, {"step_id": step_id, "action": {
@@ -89,7 +91,8 @@ def run(config, output, mode):
         status = "site_failure" if mode == "technical" and last else ("success" if index % 2 == 0 else "simulated_dropout")
         result = {"session_id": sid, "persona_id": persona["id"], "policy": "scripted_fixture", "model_id": None,
                   "status": status, "reason": "fake", "steps": 3, "duration_seconds": round(time.monotonic() - started, 3),
-                  "model_calls": 0, "input_tokens": 0, "output_tokens": 0, "issues": issues, "final_artifact": artifact}
+                  "model_calls": 0, "input_tokens": 0, "output_tokens": 0, "issues": issues, "final_artifact": artifact,
+                  "terminal_stage": STAGES[2], "stages_reached": STAGES}
         writer.emit("session.finished", sid, result)
         results.append(result)
     summary = {"schema_version": "1.0", "run_id": config["run_id"], "attempt_id": writer.attempt,
