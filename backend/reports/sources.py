@@ -8,8 +8,9 @@
      "causes": ["input_burden", "trust"],       # 세션에서 기록된 이탈 원인 (agent/behavior.py CAUSES 키)
      "primary_cause": "input_burden" | None}    # 가상 이탈을 일으킨 주 원인
 
-지금은 에이전트가 남기는 파일(input.json, events.jsonl)에서 만든다 (load_from_run_dir).
-백엔드 A의 Session·Event 모델이 생기면 같은 모양을 돌려주는 load_from_db()를 추가하면 된다.
+두 가지로 만든다.
+- load_from_db(run): 백엔드 A의 Session·Observation (실제 실행)
+- load_from_run_dir(root): 에이전트가 남긴 파일(input.json, events.jsonl) (샘플·확인용)
 예전 에이전트 기록(observation에 stage가 없음)은 화면 경로로 단계를 다시 계산한다.
 """
 import json
@@ -90,4 +91,29 @@ def load_from_run_dir(root):
     records = []
     for attempt in attempts:
         records.extend(load_attempt(attempt))
+    return records
+
+
+def load_from_db(run):
+    """백엔드 A의 Run → 세션 기록 목록. 아직 끝나지 않은 세션(running)은 incomplete로 센다."""
+    from agent.funnel import funnel_stage
+    from runs.models import Session
+
+    sessions = (Session.objects.filter(run=run).select_related("persona_snapshot", "task_run")
+                .prefetch_related("observations"))
+    records = []
+    for s in sessions:
+        task_input = s.task_run.input_json or {}
+        success_path, stage_paths = task_input.get("success_path"), task_input.get("stage_paths") or {}
+        stages = [o.stage or funnel_stage(o.url, success_path, stage_paths)
+                  for o in sorted(s.observations.all(), key=lambda o: o.step)]
+        issues = s.issues or []
+        records.append({
+            "task_id": s.task_id, "seed": s.seed, "persona_id": s.persona_snapshot.code,
+            "status": s.status if s.is_terminal else "incomplete",
+            "reason": s.reason, "steps": s.steps, "duration_seconds": s.duration_seconds,
+            "stages": stages,
+            "causes": [i.get("category") for i in issues if isinstance(i, dict) and i.get("category")],
+            "primary_cause": _primary([i for i in issues if isinstance(i, dict)]),
+        })
     return records

@@ -1,11 +1,17 @@
+from django.http import HttpResponse
+from rest_framework import serializers, status
+from rest_framework.negotiation import BaseContentNegotiation
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from common.exceptions import ApiError
 from common.projects import ensure_owner, get_owned_project
 from common.views import BaseAPIView
 
-from . import services
-from .models import ReportSnapshot
+from plans.serializers import StrictSerializer
+
+from . import exporters, services
+from .models import ReportSnapshot, ShareLink
 
 
 class RunReportView(BaseAPIView):
@@ -73,3 +79,88 @@ class ProjectDashboardView(BaseAPIView):
 
     def get(self, request, project_id):
         return Response(services.dashboard(get_owned_project(request.user, project_id)))
+
+
+# ---------- 내보내기 (11/16 Markdown, 11/17 PDF) ----------
+
+class AnyAcceptNegotiation(BaseContentNegotiation):
+    """파일 요청의 Accept(text/markdown, application/pdf)가 JSON 렌더러와 맞지 않아 406이 나지 않게 한다."""
+
+    def select_parser(self, request, parsers):
+        return parsers[0]
+
+    def select_renderer(self, request, renderers, format_suffix=None):
+        return renderers[0], renderers[0].media_type
+
+
+def _download(content, content_type, filename):
+    response = HttpResponse(content, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+class ReportMarkdownView(BaseAPIView):
+    """GET /api/v1/reports/{id}/export.md — Markdown 파일 내려받기"""
+    content_negotiation_class = AnyAcceptNegotiation
+
+    def get(self, request, report_id):
+        report = _own_report(request, report_id)
+        return _download(exporters.report_markdown(report).encode("utf-8"), "text/markdown; charset=utf-8",
+                         exporters.export_filename(report, "md"))
+
+
+class ReportPdfView(BaseAPIView):
+    """GET /api/v1/reports/{id}/export.pdf — PDF 파일 내려받기 (Chromium으로 인쇄, 1~3초)"""
+    content_negotiation_class = AnyAcceptNegotiation
+
+    def get(self, request, report_id):
+        report = _own_report(request, report_id)
+        page = exporters.markdown_to_html(exporters.report_markdown(report))
+        try:
+            pdf = exporters.render_pdf(page)
+        except exporters.PdfUnavailable as exc:
+            raise ApiError(503, "PDF_UNAVAILABLE", "지금은 PDF를 만들 수 없습니다. Markdown으로 내려받아 주세요.") from exc
+        return _download(pdf, "application/pdf", exporters.export_filename(report, "pdf"))
+
+
+# ---------- 공유 링크 (11/17) ----------
+
+class ShareLinkCreateSerializer(StrictSerializer):
+    expires_in_days = serializers.IntegerField(min_value=1, max_value=services.SHARE_DAYS_MAX, required=False,
+                                               default=services.SHARE_DAYS_DEFAULT)
+
+
+class ReportShareLinkView(BaseAPIView):
+    """GET·POST /api/v1/reports/{id}/share-links — 공유 링크 목록·만들기 {expires_in_days: 1~30, 기본 7}"""
+
+    def get(self, request, report_id):
+        report = _own_report(request, report_id)
+        return Response({"items": [services.share_link_dict(link) for link in report.share_links.all()]})
+
+    def post(self, request, report_id):
+        report = _own_report(request, report_id)
+        serializer = ShareLinkCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        link = services.create_share_link(report, request.user, serializer.validated_data["expires_in_days"])
+        return Response(services.share_link_dict(link), status=status.HTTP_201_CREATED)
+
+
+class ShareLinkDetailView(BaseAPIView):
+    """DELETE /api/v1/share-links/{id} — 공유 링크 취소"""
+
+    def delete(self, request, link_id):
+        link = ShareLink.objects.select_related("report__plan_snapshot__plan__project").filter(pk=link_id).first()
+        if link is None:
+            raise ApiError(404, "NOT_FOUND", "공유 링크를 찾을 수 없습니다.")
+        ensure_owner(request.user, link.report.plan_snapshot.plan.project)
+        services.revoke_share_link(link)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SharedReportView(BaseAPIView):
+    """GET /api/v1/shared/{token} — 로그인 없이 공유된 리포트 보기"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        return Response(services.shared_report(token))
