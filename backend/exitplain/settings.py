@@ -20,13 +20,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-glmr8$asd7b=bj(z$gy4ljyg#tn7bpo_-p$m_mt(-*2=3#b4)3'
+def _env_list(name):
+    return [v.strip() for v in os.environ.get(name, '').split(',') if v.strip()]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+def _env_bool(name, default=False):
+    return os.environ.get(name, str(default)).strip().lower() in ('1', 'true', 'yes')
+
+
+_DEV_SECRET_KEY = 'django-insecure-dev-only-do-not-use-in-production'
+
+# 환경변수가 없으면 로컬 개발용 기본값으로 동작한다. 서버에서는 .env로 반드시 덮어쓴다.
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _DEV_SECRET_KEY)
+
+DEBUG = _env_bool('DJANGO_DEBUG', True)
+
+# 운영(DEBUG=False)에서 개발용 키가 그대로 쓰이는 사고를 막는다.
+if not DEBUG and SECRET_KEY == _DEV_SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DEBUG=False 에서는 DJANGO_SECRET_KEY 환경변수가 필요합니다.')
+
+ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS')
+CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS')
+
+# HTTPS(도메인 + certbot)를 붙인 뒤 DJANGO_HTTPS=True 로 켠다.
+if _env_bool('DJANGO_HTTPS'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 # Application definition
@@ -85,7 +106,13 @@ WSGI_APPLICATION = 'exitplain.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get('DJANGO_DB_PATH', BASE_DIR / 'db.sqlite3'),
+        # 웹(gunicorn)과 워커가 동시에 쓰므로 'database is locked'를 줄이는 설정.
+        'OPTIONS': {
+            'timeout': 20,
+            'init_command': 'PRAGMA journal_mode=WAL;',
+            'transaction_mode': 'IMMEDIATE',
+        },
     }
 }
 
@@ -125,6 +152,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# collectstatic 결과물 위치 (Nginx 의 /static/ alias 와 같은 경로)
+STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', BASE_DIR / 'staticfiles')
 
 
 # Email
