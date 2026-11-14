@@ -1,9 +1,9 @@
 """세션 상세 (타임라인·좌절 점수 그래프 데이터).
 
-지금은 에이전트가 남긴 실행 폴더를 읽는다:
+두 곳에서 같은 모양으로 읽는다.
+- load_session_from_db: 백엔드 A의 Session·Observation·RunEvent (실제 실행). 스크린샷은 A의 서빙 주소
+- load_session: 에이전트가 남긴 실행 폴더 (샘플 리포트용)
     {EXITPLAIN_RUN_OUTPUT_DIR}/{run_ref}_{task_id}_s{seed}/{attempt}/events.jsonl
-(agent.execute_run(output_dir=...)가 만드는 구조. run_id 형식은 plans.run_input과 같다.)
-백엔드 A의 Session·Event 모델이 생기면 같은 모양을 돌려주는 DB 버전으로 바꾸면 된다.
 """
 import json
 import re
@@ -49,6 +49,67 @@ def _events(attempt_dir, session_id):
     return sorted(events, key=lambda e: e.get("sequence", 0))
 
 
+def _summary(status, reason, steps, duration, terminal_stage, issues, timeline):
+    from agent.behavior import CAUSES
+
+    primary = next((i.get("category") for i in issues if i.get("primary")), None)
+    threshold = next((s["frustration_threshold"] for s in reversed(timeline)
+                      if s["frustration_threshold"] is not None), None)
+    return {
+        "status": status, "reason": reason, "steps": steps, "duration_seconds": duration,
+        "terminal_stage": terminal_stage or (timeline[-1]["stage"] if timeline else None),
+        "primary_cause": {"key": primary, "name": CAUSES.get(primary, primary)} if primary else None,
+        "causes": [{"key": i.get("category"), "name": CAUSES.get(i.get("category"), i.get("category"))}
+                   for i in issues if i.get("category")],
+        "timeline": timeline,
+        "chart": {"threshold": threshold,
+                  "points": [{"index": s["index"], "stage": s["stage"], "score": s["frustration_score"]}
+                             for s in timeline if s["frustration_score"] is not None]},
+    }
+
+
+def load_session_from_db(run, task_id, seed, persona_id):
+    """A의 DB에서 세션 1개의 타임라인. 마찰·다음 행동은 RunEvent(friction.detected, action.completed)에서 붙인다."""
+    from agent.behavior import CAUSES
+    from agent.funnel import funnel_stage, stage_name
+    from runs.models import RunEvent, Session
+
+    session = (Session.objects.select_related("task_run").filter(run=run, task_id=task_id, seed=seed,
+                                                                  persona_snapshot__code=persona_id).first())
+    if session is None:
+        raise SessionNotFound("이 실행에 해당 페르소나의 세션이 없습니다.")
+    task_input = session.task_run.input_json or {}
+    success_path, stage_paths = task_input.get("success_path"), task_input.get("stage_paths") or {}
+    timeline, by_id = [], {}
+    for o in session.observations.order_by("step"):
+        stage = o.stage or funnel_stage(o.url, success_path, stage_paths)
+        step = {"step_id": o.step_id, "index": len(timeline), "url": o.url, "stage": stage,
+                "stage_name": stage_name(stage), "frustration_score": o.frustration_score,
+                "frustration_threshold": o.frustration_threshold, "required_fields": o.required_fields,
+                "screenshot": f"/api/v1/observations/{o.id}/screenshot" if o.artifact else None,   # A의 서빙 API
+                "frictions": [], "action": None}
+        timeline.append(step)
+        by_id[o.step_id] = step
+    for event in RunEvent.objects.filter(session=session, type__in=("friction.detected", "action.completed")):
+        payload = event.payload or {}
+        if event.type == "friction.detected":
+            target = by_id.get((payload.get("evidence_step_ids") or [None])[0]) or (timeline[-1] if timeline else None)
+            if target is not None:
+                category = payload.get("category")
+                target["frictions"].append({"category": category, "name": CAUSES.get(category, category),
+                                            "contribution": payload.get("contribution")})
+        else:
+            target, action = by_id.get(payload.get("step_id")), payload.get("action") or {}
+            if target is not None:
+                target["action"] = {"kind": action.get("kind"), "target_id": action.get("target_id"),
+                                    "explanation": action.get("explanation")}
+    issues = [i for i in (session.issues or []) if isinstance(i, dict)]
+    return {"session_id": session.session_key,
+            "final_screenshot": f"/api/v1/sessions/{session.id}/final-screenshot" if session.final_screenshot else None,
+            **_summary(session.status if session.is_terminal else "incomplete", session.reason, session.steps,
+                       session.duration_seconds, session.terminal_stage, issues, timeline)}
+
+
 def load_session(attempt_dir, persona_id):
     """한 세션의 타임라인. 화면(observation)마다 1줄, 그 화면에서 생긴 마찰과 다음 행동을 붙인다."""
     from agent.behavior import CAUSES
@@ -92,22 +153,8 @@ def load_session(attempt_dir, persona_id):
             finished = payload
 
     finished = finished or {}
-    issues = finished.get("issues") or []
-    primary = next((i.get("category") for i in issues if i.get("primary")), None)
-    threshold = next((s["frustration_threshold"] for s in reversed(steps) if s["frustration_threshold"] is not None),
-                     None)
-    return {
-        "session_id": session_id,
-        "status": finished.get("status", "incomplete"),
-        "reason": finished.get("reason", "종료 이벤트 없음"),
-        "steps": finished.get("steps", len(steps)),
-        "duration_seconds": finished.get("duration_seconds"),
-        "terminal_stage": finished.get("terminal_stage") or (steps[-1]["stage"] if steps else None),
-        "primary_cause": {"key": primary, "name": CAUSES.get(primary, primary)} if primary else None,
-        "causes": [{"key": i.get("category"), "name": CAUSES.get(i.get("category"), i.get("category"))}
-                   for i in issues if i.get("category")],
-        "timeline": steps,
-        "chart": {"threshold": threshold,
-                  "points": [{"index": s["index"], "stage": s["stage"], "score": s["frustration_score"]}
-                             for s in steps if s["frustration_score"] is not None]},
-    }
+    issues = [i for i in (finished.get("issues") or []) if isinstance(i, dict)]
+    return {"session_id": session_id, "final_screenshot": None,
+            **_summary(finished.get("status", "incomplete"), finished.get("reason", "종료 이벤트 없음"),
+                       finished.get("steps", len(steps)), finished.get("duration_seconds"),
+                       finished.get("terminal_stage"), issues, steps)}

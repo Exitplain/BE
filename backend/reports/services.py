@@ -10,7 +10,7 @@ from .models import ReportSnapshot
 
 
 @transaction.atomic
-def create_report(plan_snapshot, records, *, run_ref, source, user=None):
+def create_report(plan_snapshot, records, *, run_ref, source, user=None, run=None):
     """세션 기록으로 리포트를 집계해 저장한다. 같은 run_ref를 다시 집계하면 revision이 1 올라간 새 행이 생긴다."""
     if not run_ref or len(run_ref) > 100:
         raise ApiError(422, "VALIDATION_ERROR", "run_ref는 1~100자여야 합니다.", {"run_ref": ["길이를 확인해주세요."]})
@@ -23,8 +23,20 @@ def create_report(plan_snapshot, records, *, run_ref, source, user=None):
             .aggregate(m=Max("revision"))["m"] or 0)
     return ReportSnapshot.objects.create(
         plan_snapshot=plan_snapshot, run_ref=run_ref, revision=last + 1, status=data["status"],
-        source=source, data=data, created_by=user,
+        source=source, data=data, created_by=user, run=run,
     )
+
+
+def create_report_for_run(run, user=None):
+    """백엔드 A의 Run(DB)으로 집계. 같은 Run을 다시 집계하면 revision이 올라간다."""
+    records = sources.load_from_db(run)
+    return create_report(run.plan_snapshot, records, run_ref=str(run.id),
+                         source=ReportSnapshot.Source.DATABASE, user=user or run.created_by, run=run)
+
+
+def finalize_run(run):
+    """A의 워커가 실행을 마친 뒤 부르는 함수 (settings.EXITPLAIN_FINALIZE_HOOK = "reports.services:finalize_run")."""
+    return create_report_for_run(run)
 
 
 def create_report_from_run_dir(plan_snapshot, run_dir, *, run_ref, user=None):
@@ -70,10 +82,13 @@ def session_detail(report, task_id, seed, persona_id):
         raise ApiError(404, "NOT_FOUND", "이 리포트에 없는 세션입니다.")
     persona = next((p for p in report.plan_snapshot.data.get("personas", []) if p["code"] == persona_id), {})
     try:
-        attempt = session_files.find_attempt(report.run_ref, task_id, seed, persona_id)
-        detail = session_files.load_session(attempt, persona_id)
+        if report.run_id:   # 실제 실행: A의 DB에서 읽는다
+            detail = session_files.load_session_from_db(report.run, task_id, seed, persona_id)
+        else:               # 샘플 실행 폴더로 만든 리포트
+            attempt = session_files.find_attempt(report.run_ref, task_id, seed, persona_id)
+            detail = session_files.load_session(attempt, persona_id)
     except session_files.SessionNotFound as exc:
-        raise ApiError(409, "SESSION_FILES_MISSING", f"세션 기록 파일을 찾지 못했습니다: {exc}") from exc
+        raise ApiError(409, "SESSION_FILES_MISSING", f"세션 기록을 찾지 못했습니다: {exc}") from exc
     task = next((t for t in report.plan_snapshot.data.get("tasks", []) if t["id"] == task_id), {})
     return {"report_id": str(report.id), "run_ref": report.run_ref, "task": {"id": task_id, "name": task.get("name")},
             "seed": seed,

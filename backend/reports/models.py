@@ -7,7 +7,9 @@ from django.db import models
 class ReportSnapshot(models.Model):
     """한 번의 실행(Run)을 집계한 결과. 만든 뒤에는 바꾸지 않고, 다시 집계하면 revision이 올라간 새 행을 만든다.
 
-    run_ref: 백엔드 A의 Run ID. A의 Run 모델이 생기면 FK로 바꾼다. 지금은 샘플 실행 폴더 이름 등 문자열.
+    run: 백엔드 A의 Run (runs.Run). 실행이 끝나면 A의 워커가 finalize_run(run)을 불러 자동으로 만든다.
+    run_ref: str(run.id). A의 runs/report_link.py가 이 값으로 리포트를 찾으므로 그대로 남긴다.
+            샘플 실행 폴더로 만든 리포트(run=None)는 폴더 이름 등 문자열.
     """
 
     class Status(models.TextChoices):
@@ -20,6 +22,7 @@ class ReportSnapshot(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     plan_snapshot = models.ForeignKey("plans.PlanSnapshot", on_delete=models.PROTECT, related_name="reports")
+    run = models.ForeignKey("runs.Run", on_delete=models.PROTECT, null=True, blank=True, related_name="reports")
     run_ref = models.CharField(max_length=100)
     revision = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=10, choices=Status.choices)
