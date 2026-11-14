@@ -1,10 +1,13 @@
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from common.projects import get_owned_project
 from common.views import BaseAPIView
 
 from . import services, url_check
+from .access import get_viewable_project
+from .models import Project
 from .serializers import ProjectCreateSerializer, ProjectListQuerySerializer
 
 
@@ -26,11 +29,24 @@ class ProjectListCreateView(BaseAPIView):
 
 
 class ProjectDetailView(BaseAPIView):
-    """GET /api/v1/projects/{id} — C05 프로젝트 개요 (다른 사람의 프로젝트는 403)"""
+    """GET /api/v1/projects/{id} — C05 프로젝트 개요 (남의 프로젝트는 403, 샘플 프로젝트는 로그인 없이도 볼 수 있다)"""
+
+    permission_classes = [AllowAny]
 
     def get(self, request, project_id):
-        project = get_owned_project(request.user, project_id)
+        project = get_viewable_project(request.user, project_id)
         return Response(services.project_detail(project))
+
+
+class SampleProjectListView(BaseAPIView):
+    """GET /api/v1/sample/projects — 로그인 전 둘러보기(L06)에 쓰는 샘플 프로젝트 목록 (로그인 불필요)"""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        queryset = Project.objects.filter(is_sample=True, archived_at__isnull=True).order_by("pk")
+        items = [services.project_summary(p) for p in services._with_last_pretest(queryset)]
+        return Response({"items": items, "next_cursor": None, "total": len(items)})
 
 
 class ProjectCheckView(BaseAPIView):
