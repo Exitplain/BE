@@ -24,7 +24,25 @@ class RunInputTests(WizardMixin, TestCase):
         self.assertEqual(first.success_path, "/order/success")
         self.assertEqual(first.allowed_origins, ["http://shop.local:8080"])
         self.assertEqual((len(first.personas), first.personas[0].id), (20, "P-001"))
-        self.assertEqual((first.max_steps, first.timeout_seconds, first.concurrency), (40, 300, 3))
+        self.assertEqual((first.max_steps, first.timeout_seconds, first.concurrency), (40, 300, 5))
+        # Figma 실행 조건과 페르소나 수치가 에이전트에 그대로 들어간다
+        self.assertEqual((first.seed, first.viewport_width, first.viewport_height, first.action_interval_seconds),
+                         (1, 390, 844, 1.0))
+        self.assertEqual([i["seed"] for i in inputs[:3]], [1, 2, 3])
+        p1 = first.personas[0]
+        # 규칙 생성기: 빠른 구매형(22, 80, 40, 30)에 '30대·퇴근·모바일·처음'이 반영된 값
+        self.assertEqual((p1.patience, p1.digital_literacy, p1.price_sensitivity, p1.trust_need), (9, 87, 40, 40))
+        self.assertEqual(first.personas[5].trust_need, 85)          # 두 번째 세그먼트(꼼꼼한 비교형)
+        self.assertEqual(p1.frustration_threshold, 60)
+
+    def test_frustration_off_and_desktop(self, _):
+        plan = self.patch(self.ready_plan(), {"limits": {"viewport_width": 1280}}).json()
+        snapshot = PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
+        snapshot.data["frustration_enabled"] = False      # 예전 스냅샷(토글이 있던 때) 호환
+        inputs = build_run_inputs(snapshot, run_id="r")
+        first = RunInput.model_validate(inputs[0])
+        self.assertTrue(all(p.frustration_threshold >= 1_000_000 for p in first.personas))   # 가상 이탈 없음
+        self.assertEqual((first.viewport_width, first.viewport_height), (1280, 800))
 
     def test_frozen_after_project_change(self, _):
         snapshot = self.snapshot()
@@ -43,7 +61,8 @@ class RunInputTests(WizardMixin, TestCase):
         snap = self.confirm()
         res = self.client.get(f"/api/v1/plan-revisions/{snap['plan_revision_id']}/run-inputs").json()
         self.assertEqual(len(res["items"]), 6)
-        self.assertIn("frustration_enabled", res["not_passed_to_agent"])
+        self.assertEqual(len(res["not_passed_to_agent"]), 2)
+        self.assertTrue(res["not_passed_to_agent"][1].startswith("limits.cost_cap"))
 
     @override_settings(EXITPLAIN_APPEND_DEMO_QUERY=False)
     def test_without_demo_query(self, _):

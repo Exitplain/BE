@@ -3,6 +3,7 @@ from django.db.models import Max
 
 from common.exceptions import ApiError
 
+from . import sessions as session_files
 from . import sources
 from .aggregate import build_report_data
 from .models import ReportSnapshot
@@ -46,3 +47,83 @@ def report_dict(report):
             "status": report.status, "source": report.source, "kind": "prediction",
             "plan_revision_id": str(report.plan_snapshot_id), "created_at": report.created_at.isoformat(),
             "data": report.data}
+
+
+# ---------- 세션 목록·상세 (11/14) ----------
+
+SESSION_FILTERS = ("task_id", "seed", "status", "kind", "segment_id")
+
+
+def session_rows(report, filters):
+    rows = report.data.get("sessions", [])
+    for key in SESSION_FILTERS:
+        value = filters.get(key)
+        if value not in (None, ""):
+            rows = [r for r in rows if str(r.get(key)) == str(value)]
+    return rows
+
+
+def session_detail(report, task_id, seed, persona_id):
+    row = next((r for r in report.data.get("sessions", []) if r["task_id"] == task_id and r["seed"] == seed
+                and r["persona_id"] == persona_id), None)
+    if row is None:
+        raise ApiError(404, "NOT_FOUND", "이 리포트에 없는 세션입니다.")
+    persona = next((p for p in report.plan_snapshot.data.get("personas", []) if p["code"] == persona_id), {})
+    try:
+        attempt = session_files.find_attempt(report.run_ref, task_id, seed, persona_id)
+        detail = session_files.load_session(attempt, persona_id)
+    except session_files.SessionNotFound as exc:
+        raise ApiError(409, "SESSION_FILES_MISSING", f"세션 기록 파일을 찾지 못했습니다: {exc}") from exc
+    task = next((t for t in report.plan_snapshot.data.get("tasks", []) if t["id"] == task_id), {})
+    return {"report_id": str(report.id), "run_ref": report.run_ref, "task": {"id": task_id, "name": task.get("name")},
+            "seed": seed,
+            "persona": {"code": persona_id, "segment_id": persona.get("segment_id"),
+                        "segment_name": persona.get("segment_name"), "variables": persona.get("variables"),
+                        "context": persona.get("context")},
+            **detail}
+
+
+# ---------- 진단 기록 목록·대시보드 (11/15) ----------
+
+def _top_causes(report, limit=3):
+    totals = {}
+    for task in report.data.get("tasks", []):
+        for cause in task.get("causes", []):
+            entry = totals.setdefault(cause["key"], {"key": cause["key"], "name": cause["name"], "dropouts": 0})
+            entry["dropouts"] += cause["dropouts"]
+    ranked = sorted((c for c in totals.values() if c["dropouts"]), key=lambda c: -c["dropouts"])
+    return ranked[:limit]
+
+
+def report_summary(report):
+    summary = report.data.get("summary", {})
+    return {"report_id": str(report.id), "run_ref": report.run_ref, "revision": report.revision,
+            "status": report.status, "created_at": report.created_at.isoformat(),
+            "plan_revision_id": str(report.plan_snapshot_id),
+            "tasks": [{"id": t["task_id"], "name": t["name"], "achievement_rate": t["achievement_rate"]}
+                      for t in report.data.get("tasks", [])],
+            "achievement_rate": summary.get("achievement_rate"),
+            "success": summary.get("success", 0), "dropout": summary.get("dropout", 0),
+            "technical": summary.get("technical", 0), "incomplete": summary.get("incomplete", 0),
+            "top_causes": _top_causes(report)}
+
+
+def project_reports(project):
+    """실행(run_ref)마다 가장 최근 revision 1개씩, 최신순."""
+    latest = {}
+    for report in (ReportSnapshot.objects.select_related("plan_snapshot")
+                   .filter(plan_snapshot__plan__project=project).order_by("-created_at", "-revision")):
+        latest.setdefault(report.run_ref, report)
+    return list(latest.values())
+
+
+def dashboard(project, trend_size=10):
+    reports = project_reports(project)
+    latest = reports[0] if reports else None
+    trend = [{"run_ref": r.run_ref, "created_at": r.created_at.isoformat(),
+              "achievement_rate": r.data.get("summary", {}).get("achievement_rate")}
+             for r in reversed(reports[:trend_size])]          # 오래된 것 → 최신
+    return {"project_id": project.pk, "runs": len(reports),
+            "latest": report_summary(latest) if latest else None,
+            "trend": trend,
+            "recent": [report_summary(r) for r in reports[:5]]}

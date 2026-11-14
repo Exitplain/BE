@@ -1,8 +1,9 @@
 """확정 스냅샷 → `python -m agent.cli --input` 용 input.json (백엔드 A의 워커가 호출).
 
-지금 agent.schemas.RunInput 기준으로 만든다 (에이전트 수정 없이 바로 실행 가능).
-- 과업 1개 × 시드 1회 = RunInput 1건 (RunInput은 goal·success_path가 1개이고 시드 칸이 없음)
-- 아래 UNSUPPORTED_FIELDS는 스냅샷에만 있고 RunInput에 넣을 칸이 없다 (LLM 담당과 맞출 목록)
+agent.schemas.RunInput 기준으로 만든다 (b/agent-update에서 추가한 칸 포함).
+- 과업 1개 × 시드 1회 = RunInput 1건 (RunInput은 goal·success_path가 1개라서)
+- 페르소나 수치 4개, 시드, 화면 폭, 요청 간격, 동시 실행을 그대로 넘긴다
+- 아래 UNSUPPORTED_FIELDS는 스냅샷에만 있고 에이전트에 넘기지 않는 값이다
 반드시 PlanSnapshot.data만 읽는다. 확정 뒤 계획·프로젝트가 바뀌어도 실행 입력은 그대로다.
 """
 import re
@@ -13,9 +14,12 @@ from django.conf import settings
 RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 UNSUPPORTED_FIELDS = (
-    "tasks[].funnel", "frustration_enabled", "limits.viewport_width", "limits.request_interval_seconds",
-    "limits.cost_cap", "limits.seed_count(시드 값 자체)", "personas[].variables",
+    "tasks[].funnel (에이전트가 화면 경로로 7단계를 자동 결정)",
+    "limits.cost_cap (에이전트에는 금액이 아니라 토큰 상한만 있음)",
 )
+MOBILE_MAX_WIDTH = 480
+VIEWPORT_HEIGHT = {"mobile": 844, "desktop": 800}
+NO_DROPOUT_THRESHOLD = 1_000_000   # frustration_enabled=False면 가상 이탈이 일어나지 않게
 
 
 class RunInputError(ValueError):
@@ -32,12 +36,17 @@ def _entry_url(entry_url, variant, case):
     return urlunsplit(parts._replace(path=parts.path or "/", query=urlencode(query)))
 
 
-def _agent_persona_defaults():
-    """페르소나 수치 4개를 에이전트 필드로 바꾸는 규칙이 아직 없어 agent.schemas.Persona 기본값을 쓴다."""
-    from agent.schemas import Persona
-    f = Persona.model_fields
-    return {"max_required_fields": f["max_required_fields"].default,
-            "frustration_threshold": f["frustration_threshold"].default}
+VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
+
+
+def _agent_persona(p, frustration_enabled):
+    """스냅샷 페르소나 → agent.schemas.Persona. 수치 4개는 에이전트가 이탈 판정에 직접 쓴다 (agent/behavior.py)."""
+    variables = p.get("variables") or {}
+    persona = {"id": p["code"], "context": p["context"],
+               **{k: int(variables[k]) for k in VARIABLE_KEYS if k in variables}}
+    if not frustration_enabled:
+        persona["frustration_threshold"] = NO_DROPOUT_THRESHOLD
+    return persona
 
 
 def build_run_input(snapshot, *, run_id, task_id, seed=1):
@@ -57,7 +66,8 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         raise RunInputError(f"seed는 1~{limits['seed_count']} 사이여야 합니다.")
 
     site = data["site"]
-    defaults = _agent_persona_defaults()
+    width = limits["viewport_width"]
+    frustration_enabled = data.get("frustration_enabled", True)
     payload = {
         "schema_version": "1.0",
         "run_id": f"{run_id}_{task_id}_s{seed}",
@@ -65,10 +75,14 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         "allowed_origins": site["allowed_origins"],
         "goal": task["goal"],
         "success_path": task["success_path"],
-        "personas": [{"id": p["code"], "context": p["context"], **defaults} for p in data["personas"]],
+        "personas": [_agent_persona(p, frustration_enabled) for p in data["personas"]],
         "max_steps": limits["max_steps"],
         "timeout_seconds": limits["timeout_seconds"],
-        "concurrency": limits["concurrency"],
+        "concurrency": min(limits["concurrency"], 5),
+        "seed": seed,
+        "viewport_width": width,
+        "viewport_height": VIEWPORT_HEIGHT["mobile" if width <= MOBILE_MAX_WIDTH else "desktop"],
+        "action_interval_seconds": min(float(limits["request_interval_seconds"]), 5.0),
     }
     try:
         return RunInput.model_validate(payload).model_dump(mode="json")

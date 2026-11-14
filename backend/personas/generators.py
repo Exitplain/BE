@@ -7,10 +7,12 @@ LLM 담당의 생성 함수가 오면 settings.EXITPLAIN_PERSONA_GENERATOR에 "�
     #                   "variables": {"patience": 22, "digital_literacy": 80,
     #                                 "price_sensitivity": 40, "trust_need": 30}}, ...]
 
-기본값(fixture)은 타겟 설명과 관계없이 Figma P07 예시 값을 돌려준다.
+설정이 없으면(None) 규칙 기반 생성기(personas/rules.py, 이름 rules-v1)를 쓴다.
+Figma P07 예시 값을 그대로 쓰려면 "personas.generators.fixture_generate"를 넣는다.
 """
 from django.conf import settings
 from django.utils.module_loading import import_string
+from . import rules
 
 VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
 FIXTURE_NAME = "fixture-figma-p07"
@@ -34,7 +36,12 @@ def fixture_generate(audience_context, ages, segment_counts):
 
 def generate(audience_context, ages, segment_counts):
     path = getattr(settings, "EXITPLAIN_PERSONA_GENERATOR", None)
-    name, func = (path, import_string(path)) if path else (FIXTURE_NAME, fixture_generate)
+    if path == "personas.generators.fixture_generate":
+        name, func = FIXTURE_NAME, fixture_generate
+    elif path:
+        name, func = path, import_string(path)
+    else:
+        name, func = rules.NAME, rules.generate
     segments = func(audience_context, ages, segment_counts)
     if not isinstance(segments, list) or len(segments) != len(segment_counts):
         raise GenerationError("세그먼트 수가 요청과 다릅니다.")

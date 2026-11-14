@@ -43,6 +43,7 @@ def create_personas(plan_snapshot, audience_context, ages, segments):
                 context=persona_context(info["name"], audience_context, ages), generator=generator,
             ))
         summary.append({"id": segment["id"], "name": info["name"], "count": segment["count"],
-                        "variables": info["variables"], "representative": first})
+                        "variables": info["variables"], "basis": info.get("basis", []),   # 수치를 정한 근거
+                        "representative": first})
     PersonaSnapshot.objects.bulk_create(rows)
     return generator, summary, [persona_dict(p) for p in rows]

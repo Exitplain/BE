@@ -3,15 +3,18 @@
 세션 기록 1개 모양:
     {"task_id": "order", "seed": 1, "persona_id": "P-001",
      "status": "success" | "simulated_dropout" | "agent_failure" | ... | "incomplete",
-     "reason": "...", "steps": 7, "paths": ["/", "/product", ...]}   # 관측한 화면 경로, 순서대로
+     "reason": "...", "steps": 7, "duration_seconds": 12.3,
+     "stages": ["landing", "detail", ...],      # 화면마다 퍼널 단계 (agent/funnel.py 7단계 키), 순서대로
+     "causes": ["input_burden", "trust"],       # 세션에서 기록된 이탈 원인 (agent/behavior.py CAUSES 키)
+     "primary_cause": "input_burden" | None}    # 가상 이탈을 일으킨 주 원인
 
 지금은 에이전트가 남기는 파일(input.json, events.jsonl)에서 만든다 (load_from_run_dir).
 백엔드 A의 Session·Event 모델이 생기면 같은 모양을 돌려주는 load_from_db()를 추가하면 된다.
+예전 에이전트 기록(observation에 stage가 없음)은 화면 경로로 단계를 다시 계산한다.
 """
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
 
 # plans.run_input.build_run_input이 만드는 run_id 형식: {run_id}_{task_id}_s{seed}
 RUN_ID_PATTERN = re.compile(r"^(?P<run>.+)_(?P<task>[A-Za-z0-9-]+)_s(?P<seed>\d+)$")
@@ -33,8 +36,17 @@ def _read_jsonl(path):
     return sorted(events, key=lambda e: e.get("sequence", 0))
 
 
+def _primary(issues):
+    for issue in issues:
+        if issue.get("primary"):
+            return issue.get("category")
+    return None
+
+
 def load_attempt(attempt_dir):
     """실행 폴더 1개(= RunInput 1건 = 과업 1개 × 시드 1회)를 세션 기록 목록으로 바꾼다."""
+    from agent.funnel import funnel_stage
+
     attempt_dir = Path(attempt_dir)
     input_file, events_file = attempt_dir / "input.json", attempt_dir / "events.jsonl"
     if not input_file.is_file() or not events_file.is_file():
@@ -44,6 +56,7 @@ def load_attempt(attempt_dir):
     if not match:
         raise SourceError(f"run_id 형식이 {{run}}_{{task}}_s{{seed}}가 아닙니다: {run_input.get('run_id')}")
     task_id, seed = match["task"], int(match["seed"])
+    success_path, stage_paths = run_input.get("success_path"), run_input.get("stage_paths") or {}
 
     sessions = {}
     for event in _read_jsonl(events_file):
@@ -52,12 +65,17 @@ def load_attempt(attempt_dir):
         if event.get("type") == "session.started":
             persona_id = (payload.get("persona") or {}).get("id") or sid.removeprefix("session_")
             sessions[sid] = {"task_id": task_id, "seed": seed, "persona_id": persona_id,
-                             "status": "incomplete", "reason": "종료 이벤트 없음", "steps": 0, "paths": []}
+                             "status": "incomplete", "reason": "종료 이벤트 없음", "steps": 0,
+                             "duration_seconds": None, "stages": [], "causes": [], "primary_cause": None}
         elif sid in sessions and event.get("type") == "observation.created":
-            sessions[sid]["paths"].append(urlsplit(payload.get("url", "")).path or "/")
+            stage = payload.get("stage") or funnel_stage(payload.get("url", "/"), success_path, stage_paths)
+            sessions[sid]["stages"].append(stage)
         elif sid in sessions and event.get("type") == "session.finished":
+            issues = payload.get("issues") or []
             sessions[sid].update(status=payload.get("status", "incomplete"), reason=payload.get("reason", ""),
-                                 steps=payload.get("steps", 0))
+                                 steps=payload.get("steps", 0), duration_seconds=payload.get("duration_seconds"),
+                                 causes=[i.get("category") for i in issues if i.get("category")],
+                                 primary_cause=_primary(issues))
     return list(sessions.values())
 
 

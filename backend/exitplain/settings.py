@@ -174,6 +174,8 @@ EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
 EXITPLAIN_PERSONA_GENERATOR = None
 # 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
 EXITPLAIN_APPEND_DEMO_QUERY = True
+# 에이전트 실행 결과 폴더 (agent.execute_run의 output_dir). 세션 상세가 여기서 events.jsonl을 읽는다
+EXITPLAIN_RUN_OUTPUT_DIR = os.environ.get('EXITPLAIN_RUN_OUTPUT_DIR', str(BASE_DIR.parent / 'artifacts'))
 
 # --- 백엔드 B: 로그인·세션 (accounts) ---
 # 로그인 유지 시간(초). 요청할 때마다 다시 늘어난다(마지막 사용 후 이 시간이 지나면 만료 → L09 세션 만료 모달)
