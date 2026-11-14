@@ -211,6 +211,22 @@ class ReportLinkTests(RunListApiBase):
             {"task_id": "order", "name": "첫 주문 완료", "achievement_rate": 0.25},
             {"task_id": "search", "name": "상품 검색", "achievement_rate": None}])
 
+    def test_report_carries_b_summary_values_for_the_diagnosis_list(self):
+        done = self.run_(1, status=Run.Status.COMPLETED)
+        ReportSnapshot.objects.create(
+            plan_snapshot=self.snapshot, run_ref=str(done.id), revision=1, status="final", source="database",
+            data={"summary": {"achievement_rate": 0.4, "success": 8, "dropout": 10, "technical": 2, "incomplete": 0},
+                  "tasks": [{"task_id": "order", "name": "첫 주문 완료", "achievement_rate": 0.4,
+                             "causes": [{"key": "input_burden", "name": "입력 부담", "dropouts": 6},
+                                        {"key": "cost", "name": "비용 충격", "dropouts": 4},
+                                        {"key": "trust", "name": "신뢰 부족", "dropouts": 0}]}]})
+        report = self.get().json()["items"][0]["report"]
+        self.assertEqual((report["achievement_rate"], report["success"], report["dropout"], report["technical"],
+                          report["incomplete"]), (0.4, 8, 10, 2, 0))
+        self.assertEqual([c["key"] for c in report["top_causes"]], ["input_burden", "cost"])  # 0건은 뺀다
+        self.assertEqual(report["goal_rates"][0]["achievement_rate"], 0.4)  # 기존 값도 그대로
+        self.assertIn("created_at", report)
+
     def test_run_without_report_has_null_and_reports_of_other_runs_do_not_leak(self):
         with_report = self.run_(1, status=Run.Status.COMPLETED)
         self.run_(2, status=Run.Status.RUNNING)

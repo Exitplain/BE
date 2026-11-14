@@ -114,11 +114,16 @@ class SessionTests(RunsFixtureMixin, TestCase):
         """에이전트가 내보내는 종료 상태(agent.schemas.Terminal)와 어긋나면 여기서 바로 알 수 있다."""
         self.assertEqual({s.value for s in Session.TERMINAL_STATUSES}, set(get_args(Terminal)))
 
-    def test_technical_statuses_exclude_the_three_outcome_statuses(self):
-        outcome = {Session.Status.SUCCESS, Session.Status.SIMULATED_DROPOUT, Session.Status.AGENT_FAILURE}
+    def test_technical_statuses_exclude_success_and_dropout(self):
+        outcome = {Session.Status.SUCCESS, Session.Status.SIMULATED_DROPOUT}
         self.assertEqual(set(Session.TECHNICAL_STATUSES) & outcome, set())
-        self.assertEqual(len(Session.TECHNICAL_STATUSES), 4)
+        self.assertEqual(len(Session.TECHNICAL_STATUSES), 5)
         self.assertTrue(set(Session.TECHNICAL_STATUSES) <= set(Session.TERMINAL_STATUSES))
+
+    def test_technical_statuses_match_agent_and_report(self):
+        """에이전트·리포트가 보는 기술 실패와 어긋나면 실행 목록과 리포트의 숫자가 달라진다."""
+        from agent.persona_report import TECHNICAL
+        self.assertEqual({s.value for s in Session.TECHNICAL_STATUSES}, set(TECHNICAL))
 
 
 class ObservationAndEventTests(RunsFixtureMixin, TestCase):
