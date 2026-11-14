@@ -3,13 +3,15 @@ import mimetypes
 from django.http import FileResponse
 from django.urls import reverse
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.negotiation import BaseContentNegotiation
 from rest_framework.response import Response
 
 from common.exceptions import ApiError
-from common.projects import ensure_owner, get_owned_project
+from common.projects import ensure_owner
 from common.views import BaseAPIView
 from plans.models import PlanSnapshot
+from projects.access import ensure_viewable, get_viewable_project
 
 from . import importer, queries, services
 from .models import Observation, Run, Session
@@ -27,6 +29,15 @@ def get_owned_run(user, run_id):
     return run
 
 
+def get_viewable_run(user, run_id):
+    """읽기용: 내 실행이거나 샘플 프로젝트의 실행이면 로그인 없이도 볼 수 있다."""
+    run = Run.objects.select_related("project").filter(pk=run_id).first()
+    if run is None:
+        raise ApiError(404, "NOT_FOUND", "실행을 찾을 수 없습니다.")
+    ensure_viewable(user, run.project)
+    return run
+
+
 class ProjectRunListView(BaseAPIView):
     """GET /api/v1/projects/{project_id}/runs?q=&status=&kind=&period=&limit=&cursor=
 
@@ -34,8 +45,10 @@ class ProjectRunListView(BaseAPIView):
     status·kind 는 쉼표로 여러 값, period 는 7d|30d|90d|all. 번호 최신순.
     """
 
+    permission_classes = [AllowAny]
+
     def get(self, request, project_id):
-        project = get_owned_project(request.user, project_id)
+        project = get_viewable_project(request.user, project_id)
         query = RunListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         params = query.validated_data
@@ -75,8 +88,10 @@ class RunCreateView(BaseAPIView):
 class RunDetailView(BaseAPIView):
     """GET /api/v1/runs/{id} — 상태·단계(phase)·진행 상황. P08~P10 이 2~3초마다 부른다."""
 
+    permission_classes = [AllowAny]
+
     def get(self, request, run_id):
-        return Response(queries.run_detail(get_owned_run(request.user, run_id)))
+        return Response(queries.run_detail(get_viewable_run(request.user, run_id)))
 
 
 class RunCancelView(BaseAPIView):
@@ -90,8 +105,10 @@ class RunCancelView(BaseAPIView):
 class RunSessionListView(BaseAPIView):
     """GET /api/v1/runs/{id}/sessions?status=&limit=&cursor= — P11 세션 타일 (시작한 순서)"""
 
+    permission_classes = [AllowAny]
+
     def get(self, request, run_id):
-        run = get_owned_run(request.user, run_id)
+        run = get_viewable_run(request.user, run_id)
         query = SessionListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         params = query.validated_data
@@ -101,8 +118,10 @@ class RunSessionListView(BaseAPIView):
 class RunEventListView(BaseAPIView):
     """GET /api/v1/runs/{id}/events?after=&limit= — 새 이벤트만 (think-aloud·진행 갱신). next_after 를 다음 after 로."""
 
+    permission_classes = [AllowAny]
+
     def get(self, request, run_id):
-        run = get_owned_run(request.user, run_id)
+        run = get_viewable_run(request.user, run_id)
         query = EventListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         return Response(queries.list_events(run, after=query.validated_data["after"], limit=query.validated_data["limit"]))
@@ -120,6 +139,7 @@ class IgnoreClientContentNegotiation(BaseContentNegotiation):
 
 class _ScreenshotView(BaseAPIView):
     content_negotiation_class = IgnoreClientContentNegotiation
+    permission_classes = [AllowAny]  # 샘플 프로젝트 화면은 로그인 없이 볼 수 있다. 그 외는 소유자만
 
     @staticmethod
     def serve(relative_path):
@@ -147,7 +167,7 @@ class ObservationScreenshotView(_ScreenshotView):
         observation = Observation.objects.select_related("session__run__project").filter(pk=observation_id).first()
         if observation is None:
             raise ApiError(404, "NOT_FOUND", "스크린샷을 찾을 수 없습니다.")
-        ensure_owner(request.user, observation.session.run.project)
+        ensure_viewable(request.user, observation.session.run.project)
         return self.serve(observation.artifact)
 
 
@@ -158,5 +178,5 @@ class SessionFinalScreenshotView(_ScreenshotView):
         session = Session.objects.select_related("run__project").filter(pk=session_id).first()
         if session is None:
             raise ApiError(404, "NOT_FOUND", "스크린샷을 찾을 수 없습니다.")
-        ensure_owner(request.user, session.run.project)
+        ensure_viewable(request.user, session.run.project)
         return self.serve(session.final_screenshot)

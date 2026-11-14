@@ -178,3 +178,7 @@ EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT = int(os.environ.get('EXITPLAIN_MAX_ACTIVE
 EXITPLAIN_WORKER_PROCESSES = int(os.environ.get('EXITPLAIN_WORKER_PROCESSES', 1))
 # 실행이 모두 끝난 뒤 호출할 집계 함수의 경로("앱.모듈:함수"). B의 리포트 집계 함수가 정해지면 연결한다. None 이면 건너뜀
 EXITPLAIN_FINALIZE_HOOK = os.environ.get('EXITPLAIN_FINALIZE_HOOK') or None
+# 로그인 전 둘러보기(L06)용 샘플 프로젝트. manage.py seed_sample_project 가 이 값을 쓴다
+SAMPLE_PROJECT_URL = os.environ.get('SAMPLE_PROJECT_URL', 'https://banchanroad.example/')
+# 샘플 프로젝트의 소유자(로그인 불가 시스템 계정)
+SAMPLE_OWNER_EMAIL = os.environ.get('SAMPLE_OWNER_EMAIL', 'sample@exitplain.invalid')
