@@ -56,12 +56,17 @@ def request_email_code(email):
     EmailLoginCode.objects.create(email=email, code_hash=_hash(email, code),
                                   expires_at=now + timedelta(seconds=code_ttl()))
     minutes = code_ttl() // 60
-    send_mail(
-        subject="[Exitplain] 로그인 코드",
-        message=f"Exitplain 로그인 코드는 {code} 입니다.\n{minutes}분 안에 입력해 주세요.\n"
-                "직접 요청하지 않았다면 이 메일을 무시해 주세요.",
-        from_email=None, recipient_list=[email],
-    )
+    try:
+        send_mail(
+            subject="[Exitplain] 로그인 코드",
+            message=f"Exitplain 로그인 코드는 {code} 입니다.\n{minutes}분 안에 입력해 주세요.\n"
+                    "직접 요청하지 않았다면 이 메일을 무시해 주세요.",
+            from_email=None, recipient_list=[email],
+        )
+    except Exception as exc:  # SMTP 접속·인증 실패, 시간 초과 등
+        # 보내지 못한 코드는 지운다 (남겨두면 60초 재전송 대기에 걸려 바로 다시 요청할 수 없음)
+        EmailLoginCode.objects.filter(email=email, code_hash=_hash(email, code)).delete()
+        raise ApiError(503, "EMAIL_SEND_FAILED", "로그인 코드 메일을 보내지 못했어요. 잠시 뒤 다시 시도해 주세요.") from exc
     return {"email": email, "expires_in": code_ttl(), "resend_available_in": resend_seconds()}
 
 
