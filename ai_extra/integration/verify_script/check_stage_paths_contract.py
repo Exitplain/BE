@@ -121,12 +121,15 @@ def main():
                     notes["dynamic_not_expressible_now"] += 1
                 notes["dynamic_flagged_as_collision"] += int(flagged)
                 check(got == dd["key"] or flagged, name, "dynamic route %s silently mis-staged (%s)" % (dd["pattern"], got))
-        for pth, key in r["stage_patterns"].items():  # proposed pattern-aware matching can express everything
-            got = proposed_match(sample_url(pth), r["stage_patterns"])
-            check(got == key, name, "proposed matcher: %s -> %s, expected %s" % (pth, got, key))
+        for pth, key in r["stage_patterns"].items():  # pattern-aware matching must express every assignment
+            if getattr(dev, "SUPPORTS_STAGE_PATTERNS", False):
+                got = dev.funnel_stage(sample_url(pth), success, r["stage_patterns"])  # develop's own implementation
+            else:
+                got = proposed_match(sample_url(pth), r["stage_patterns"])  # reference only: develop lacks pattern support
+            check(got == key, name, "pattern matcher: %s -> %s, expected %s" % (pth, got, key))
     verdict = "pass" if not failures else "fail"
     code, _ = finish(__file__, ["FUNNEL-INTEG"], verdict, None if not failures else "contract_or_roundtrip_mismatch",
-                     {"checks": cases, "failed": len(failures), "failures": failures[:15], "notes": notes,
+                     {"checks": cases, "failed": len(failures), "failures": failures[:15], "notes": notes, "develop_supports_stage_patterns": bool(getattr(dev, "SUPPORTS_STAGE_PATTERNS", False)),
                       "develop_funnel": str(funnel_path), "stage_keys": list(dev.FUNNEL_KEYS)}, sys.argv, a.out)
     sys.exit(code)
 

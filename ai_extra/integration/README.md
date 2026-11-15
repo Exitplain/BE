@@ -14,14 +14,14 @@ develop의 `agent/funnel.py`는 Figma P12의 7단계를 고정 키로 갖고, �
 `check_stage_paths_contract.py --seeds 15`: 1460건 pass. 포함: 손으로 쓴 쇼핑 fixture의 단계·`stage_paths`·충돌 정답 일치, 무작위 이름 합성 앱(4개 프레임워크 × 15 시드)에서 7개 키 이내·경로 순서 단조·진입/성공 고정·결정성, develop `funnel_stage()` 왕복, 조용한 오답 방지.
 감도 확인(변이): develop이 단계 키를 바꾸면 **blocked**, 어댑터가 동적 라우트를 접두사로 잘못 내보내면 **fail**.
 
-## 발견한 계약 한계 (develop 쪽 결정 필요)
-**`stage_paths`는 경로 접두사만 매칭해서, 목록과 상세가 같은 접두사를 쓰면 표현할 수 없다.** 예: `/products`=browse, `/products/[id]`=detail. 현재는 `/products/5`가 browse로 나온다. 어댑터는 이 경우를 `collisions`로 표시하고 `stage_paths`에서 뺀다(조용히 틀리지 않음). 해결하려면 develop의 매칭이 `:id` 세그먼트를 이해해야 한다(제안, **적용하지 않음**):
+## 계약 한계와 이 브랜치의 변경 (`ai/automation`)
+**원래 `stage_paths`는 경로 접두사만 매칭해서, 목록과 상세가 같은 접두사를 쓰면 표현할 수 없었다.** 예: `/products`=browse, `/products/[id]`=detail 이면 `/products/5`가 browse로 나왔다. 어댑터는 그 경우를 `collisions`로 표시하고 `stage_paths`에서 뺀다(조용히 틀리지 않음).
 
-```python
-# agent/funnel.py: stage_paths 키에 ":param" 세그먼트 허용, 가장 구체적인 패턴 우선
-# agent/schemas.py: stage_paths 검증을 `stage in FUNNEL_KEYS` 그대로 두고 키에 ':'를 허용
-```
-검증 스크립트에 이 제안 규칙의 기준 구현(`proposed_match`)이 있고, 위 합성 앱에서 모든 배정이 왕복된다. 실제 변경은 `agent/` 담당(사용자)의 결정이다.
+이 브랜치에서 `agent/funnel.py`를 다음과 같이 바꿨다 (스키마 검증은 그대로 통과 — 키가 `/`로 시작하고 값이 7개 키이면 됨):
+- `stage_paths` 키에 `:param` 구간 허용, 가장 구체적인 패턴(구간 수, 고정 구간 수) 우선. 기존 접두사 규칙(`/`는 정확히 `/`만, 대소문자·끝 슬래시 무시)은 그대로.
+- 경로 키워드 사전을 `LEGACY_WORDS`로 강등하고 `USE_LEGACY_WORDS`(기본 True)로 끌 수 있게 했다. **기본값을 True로 둔 이유**: 지금 끄면 데모 쇼핑몰이 `stage_paths` 없이 얻던 cart·signup·payment 단계가 전부 browse로 무너지고 develop 테스트가 깨진다. 끄려면 데모에도 `stage_paths`를 공급해야 한다.
+- `tests/test_funnel.py`에 새 동작 테스트 5개 추가.
+- 어댑터의 `stage_patterns`(`:id` 표기)는 이 구현으로 왕복 검증된다 (`SUPPORTS_STAGE_PATTERNS` 플래그).
 
 ## 한계 (통과가 의미하지 않는 것)
 - 신호 규칙(비밀번호→signup 등)의 **의미 정확도는 손으로 쓴 fixture 1개에서만** 확인했다. 실제 쇼핑몰 코드에서의 정확도는 미검증이다.
