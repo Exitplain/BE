@@ -1,0 +1,2 @@
+{ "router": "react-router-v6", "entry": "/", "success": "/finish", "status": "ok",
+  "funnel": ["/", "/finish"], "needs_gui_check": [], "unresolved_kinds": ["dynamic_navigation"] }

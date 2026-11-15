@@ -1,0 +1,493 @@
+{
+  "_note": "Ground truth written by reading each app's source BEFORE looking at extractor output. Apps are not vendored; check them out at the given commits. 'dev' apps were read while tuning the extractor; 'reserve' apps must stay unread until the extractor is frozen.",
+  "sources": {
+    "react-router-examples": {
+      "url": "https://github.com/remix-run/react-router-examples.git",
+      "commit": "60e61f64cc96566f02361ccd0109d6c894f32324",
+      "subdir": ""
+    },
+    "nextjs-examples": {
+      "url": "https://github.com/vercel/next.js.git",
+      "commit": "c71d522ee9fed36a31b5e03c9d69bafee3ef5929",
+      "subdir": "examples"
+    }
+  },
+  "apps": {
+    "basic": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/about",
+      "routes": [
+        "/",
+        "/about",
+        "/dashboard",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/*",
+          "/"
+        ]
+      ]
+    },
+    "navigation-blocking": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/one",
+      "routes": [
+        "/",
+        "/one",
+        "/two",
+        "/three",
+        "/four",
+        "/five"
+      ],
+      "page_edges": []
+    },
+    "view-transitions": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/images/:id",
+      "routes": [
+        "/",
+        "/loader",
+        "/action",
+        "/defer",
+        "/defer-no-boundary",
+        "/images",
+        "/images/:id"
+      ],
+      "page_edges": [
+        [
+          "/images",
+          "/images/:id"
+        ]
+      ]
+    },
+    "basic-data-router": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/",
+      "routes": [
+        "/"
+      ],
+      "page_edges": []
+    },
+    "auth": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/login",
+      "routes": [
+        "/",
+        "/login",
+        "/protected"
+      ],
+      "page_edges": [
+        [
+          "/protected",
+          "/login"
+        ]
+      ]
+    },
+    "lazy-loading": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/dashboard/messages",
+      "routes": [
+        "/",
+        "/about",
+        "/dashboard/*",
+        "/*",
+        "/dashboard",
+        "/dashboard/messages"
+      ],
+      "page_edges": [
+        [
+          "/*",
+          "/"
+        ]
+      ]
+    },
+    "route-objects": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/courses/:id",
+      "routes": [
+        "/",
+        "/courses",
+        "/courses/:id",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/courses",
+          "/courses/:id"
+        ],
+        [
+          "/courses/:id",
+          "/courses"
+        ],
+        [
+          "/*",
+          "/"
+        ]
+      ]
+    },
+    "modal": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/img/:id",
+      "routes": [
+        "/",
+        "/gallery",
+        "/img/:id",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/img/:id"
+        ],
+        [
+          "/gallery",
+          "/img/:id"
+        ],
+        [
+          "/*",
+          "/"
+        ]
+      ]
+    },
+    "auth-router-provider": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/login",
+      "routes": [
+        "/",
+        "/login",
+        "/protected",
+        "/logout"
+      ],
+      "page_edges": [
+        [
+          "/logout",
+          "/"
+        ],
+        [
+          "/login",
+          "/"
+        ],
+        [
+          "/protected",
+          "/login"
+        ]
+      ],
+      "note": "edges come from route loader/action redirects (redirect(...) in functions referenced by the route)",
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "custom-link": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/about",
+      "routes": [
+        "/",
+        "/about",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/*",
+          "/"
+        ]
+      ],
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "data-router": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/todos/:id",
+      "routes": [
+        "/",
+        "/todos",
+        "/todos/:id",
+        "/deferred"
+      ],
+      "page_edges": [
+        [
+          "/todos",
+          "/todos/:id"
+        ]
+      ],
+      "note": "'/todos' has children but is itself a matchable page",
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "lazy-loading-router-provider": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/dashboard/messages",
+      "routes": [
+        "/",
+        "/about",
+        "/dashboard",
+        "/dashboard/messages",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/*",
+          "/"
+        ]
+      ],
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "modal-route-with-outlet": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/gallery/img/:id",
+      "routes": [
+        "/",
+        "/gallery",
+        "/gallery/img/:id"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/gallery"
+        ],
+        [
+          "/gallery",
+          "/gallery/img/:id"
+        ]
+      ],
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "search-params": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/",
+      "routes": [
+        "/",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/*",
+          "/"
+        ]
+      ],
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "custom-filter-link": {
+      "source": "react-router-examples",
+      "split": "dev",
+      "success": "/sneakers/:id",
+      "routes": [
+        "/",
+        "/sneakers/:id",
+        "/*"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/sneakers/:id"
+        ],
+        [
+          "/*",
+          "/"
+        ]
+      ],
+      "note_split": "was reserve run 1 (failed); then used for fixes, so now dev"
+    },
+    "with-supabase": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/auth/error",
+      "routes": [
+        "/auth/error",
+        "/auth/forgot-password",
+        "/auth/login",
+        "/auth/sign-up-success",
+        "/auth/sign-up",
+        "/auth/update-password",
+        "/",
+        "/protected"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/"
+        ],
+        [
+          "/protected",
+          "/auth/login"
+        ]
+      ],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    },
+    "image-component": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/background",
+      "routes": [
+        "/background",
+        "/color",
+        "/fill",
+        "/",
+        "/placeholder",
+        "/responsive",
+        "/shimmer",
+        "/theme"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/responsive"
+        ],
+        [
+          "/",
+          "/fill"
+        ],
+        [
+          "/",
+          "/placeholder"
+        ],
+        [
+          "/",
+          "/shimmer"
+        ],
+        [
+          "/",
+          "/color"
+        ],
+        [
+          "/",
+          "/theme"
+        ],
+        [
+          "/",
+          "/background"
+        ]
+      ],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    },
+    "prisma-postgres": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/",
+      "routes": [
+        "/",
+        "/posts/[id]",
+        "/posts/new",
+        "/posts",
+        "/setup",
+        "/users/new"
+      ],
+      "page_edges": [
+        [
+          "/",
+          "/posts/[id]"
+        ],
+        [
+          "/posts/[id]",
+          "/posts"
+        ],
+        [
+          "/posts/new",
+          "/posts"
+        ],
+        [
+          "/posts",
+          "/posts/[id]"
+        ],
+        [
+          "/posts",
+          "/posts"
+        ],
+        [
+          "/users/new",
+          "/"
+        ]
+      ],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    },
+    "cms-buttercms": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/blog",
+      "routes": [
+        "/blog",
+        "/blog/[slug]",
+        "/blog/category/[slug]",
+        "/blog/search",
+        "/blog/tag/[slug]",
+        "/landing-page/[slug]",
+        "/missing-token"
+      ],
+      "page_edges": [
+        [
+          "/blog/[slug]",
+          "/blog"
+        ],
+        [
+          "/blog/[slug]",
+          "/blog/tag/[slug]"
+        ],
+        [
+          "/blog/category/[slug]",
+          "/blog"
+        ],
+        [
+          "/blog/search",
+          "/blog"
+        ],
+        [
+          "/blog/tag/[slug]",
+          "/blog"
+        ]
+      ],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    },
+    "auth0": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/about",
+      "routes": [
+        "/about",
+        "/advanced/api-profile",
+        "/advanced/ssr-profile",
+        "/",
+        "/profile"
+      ],
+      "page_edges": [],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    },
+    "with-prefetching": {
+      "source": "nextjs-examples",
+      "split": "reserve",
+      "subdir": "examples",
+      "success": "/about",
+      "routes": [
+        "/about",
+        "/contact",
+        "/features",
+        "/"
+      ],
+      "page_edges": [],
+      "note": "edges = navigations written in the page file itself; links inside imported components are not part of this ground truth"
+    }
+  },
+  "_excluded": {
+    "multi-app": "two apps in one package; basename is set outside the route files, ground truth ambiguous"
+  },
+  "_frozen_extractor_sha256_prefix": "8c49defdc2ddefaa",
+  "_preregistered_thresholds": {
+    "min_route_recall": 0.95,
+    "min_edge_precision": 0.9,
+    "min_edge_recall": 0.8
+  }
+}
