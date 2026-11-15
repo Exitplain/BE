@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders',
     'common',
     'projects',  
     'discoveries',
@@ -72,6 +73,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CommonMiddleware 보다 앞에 둔다
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -213,3 +215,24 @@ EXITPLAIN_FINALIZE_HOOK = os.environ.get('EXITPLAIN_FINALIZE_HOOK') or 'reports.
 SAMPLE_PROJECT_URL = os.environ.get('SAMPLE_PROJECT_URL', 'https://banchanroad.example/')
 # 샘플 프로젝트의 소유자(로그인 불가 시스템 계정)
 SAMPLE_OWNER_EMAIL = os.environ.get('SAMPLE_OWNER_EMAIL', 'sample@exitplain.invalid')
+
+# --- 프런트를 다른 주소에서 띄울 때(CORS) ---
+# 같은 주소로 서비스하면(Nginx 프록시, Vercel rewrites) 아래 값은 필요 없다. 비워 두면 다른 출처 요청은 모두 막힌다.
+# 예) CORS_ALLOWED_ORIGINS=http://localhost:5173,https://exitplain.vercel.app  (콤마로 구분, 끝에 / 없이)
+#     같은 주소들을 CSRF_TRUSTED_ORIGINS 에도 넣어야 POST·PATCH 가 통과한다.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)  # 로그인 쿠키를 주고받기 위해 (허용 출처가 있을 때만)
+CORS_URLS_REGEX = r'^/api/.*$'                       # API 만. /admin/ 등은 대상이 아니다
+CORS_ALLOW_HEADERS = (*default_headers, 'idempotency-key', 'if-match')  # 실행 생성, 계획 수정에 쓰는 요청 헤더
+CORS_EXPOSE_HEADERS = ['ETag', 'Idempotent-Replayed', 'Content-Disposition']  # 프런트가 읽어야 하는 응답 헤더
+
+# 프런트가 다른 '사이트'(예: localhost, vercel.app)에서 직접 API 를 부를 때만 켠다.
+# 쿠키를 다른 사이트로도 보내려면 SameSite=None; Secure 여야 하므로 DJANGO_HTTPS 도 함께 켜져 있어야 한다.
+# Safari 등은 다른 사이트 쿠키를 막으니, 가능하면 Vercel rewrites 나 같은 사이트(app.exitplain.store)를 쓴다.
+if _env_bool('DJANGO_CROSS_SITE_COOKIES'):
+    SESSION_COOKIE_SAMESITE = 'None'
+    CSRF_COOKIE_SAMESITE = 'None'
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
