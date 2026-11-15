@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -83,6 +84,14 @@ class EmailCodeLoginTests(TestCase):
         if old != new:
             self.assertEqual(self.verify(old).status_code, 400)
         self.assertEqual(self.verify(new).status_code, 200)
+
+    def test_mail_send_failure_is_503_and_can_retry(self):
+        # SMTP 접속·인증 실패 → 503, 보내지 못한 코드는 남기지 않아 바로 다시 요청할 수 있다
+        with patch("accounts.services.send_mail", side_effect=OSError("smtp down")):
+            res = self.client.post("/api/v1/auth/email/request", {"email": "maker@example.com"}, format="json")
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (503, "EMAIL_SEND_FAILED"))
+        self.assertFalse(EmailLoginCode.objects.exists())
+        self.request_code()                                                # 대기 없이 바로 재요청 성공
 
     def test_input_validation(self):
         res = self.client.post("/api/v1/auth/email/request", {"email": "not-an-email"}, format="json")
