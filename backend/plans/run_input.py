@@ -16,6 +16,7 @@ RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 UNSUPPORTED_FIELDS = (
     "tasks[].funnel (에이전트가 화면 경로로 7단계를 자동 결정)",
     "limits.cost_cap (에이전트에는 금액이 아니라 토큰 상한만 있음)",
+        "test_accounts (에이전트 로그인 기능이 생기면 testaccounts.services.credentials_for_snapshot으로 넘김)",
 )
 MOBILE_MAX_WIDTH = 480
 VIEWPORT_HEIGHT = {"mobile": 844, "desktop": 800}

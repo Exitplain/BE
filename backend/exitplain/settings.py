@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'reports',
     'accounts',
     'runs',
+    'testaccounts',
 ]
 
 MIDDLEWARE = [
@@ -200,6 +201,9 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
+
+# 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
+TEST_ACCOUNT_KEY = os.environ.get('TEST_ACCOUNT_KEY', '')
 AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
 # 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
 ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]

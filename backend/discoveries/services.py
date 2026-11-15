@@ -38,9 +38,9 @@ def create_discovery(user, project, data):
         raise ApiError(422, "VALIDATION_ERROR", "프로젝트에 등록한 사이트 주소만 테스트할 수 있습니다.",
                        {"entry_url": ["프로젝트 허용 주소가 아닙니다."]})
     if data["login_mode"] == Discovery.LoginMode.TEST_ACCOUNT:
-        # Figma P04 로그인 연결은 아직 제품 API가 없다
-        raise ApiError(409, "LOGIN_CONNECTION_UNAVAILABLE",
-                       "테스트 계정 로그인 연결은 아직 지원하지 않습니다. '로그인 없이 테스트'로 진행해주세요.")
+        # Figma P04: 테스트 계정이 있어야 시작할 수 있다 (계정 1개 = 페르소나 1명)
+        from testaccounts.services import ensure_ready
+        ensure_ready(project)
 
     started = time.monotonic()
     try:

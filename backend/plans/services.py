@@ -44,6 +44,26 @@ def _save(plan, fields):
     return plan
 
 
+# ---------- 페르소나 인원 ----------
+
+def uses_test_accounts(plan):
+    return plan.discovery.login_mode == Discovery.LoginMode.TEST_ACCOUNT
+
+
+def persona_total(plan):
+    """확정할 페르소나 수. 로그인 없이 테스트하면 20명, 테스트 계정으로 테스트하면 계정 수 (Figma P05h)."""
+    if uses_test_accounts(plan):
+        from testaccounts.services import account_count
+        return account_count(plan.project)
+    return catalog.PERSONA_TOTAL
+
+
+def split_segments(total):
+    """세그먼트 4개에 인원을 고르게 나눈다. 예: 10 → 3, 3, 2, 2"""
+    n = len(catalog.SEGMENT_IDS)
+    return [{"id": s, "count": total // n + (1 if i < total % n else 0)} for i, s in enumerate(catalog.SEGMENT_IDS)]
+
+
 # ---------- 생성 (1단계 결과로 계획 시작) ----------
 
 def create_plan(user, project, discovery_id):
@@ -53,11 +73,16 @@ def create_plan(user, project, discovery_id):
     if discovery.is_expired:
         raise ApiError(409, "DISCOVERY_EXPIRED", "사이트 확인 결과가 만료됐습니다. 1단계에서 다시 확인해주세요.")
     task_ids = [t["id"] for t in discovery.tasks if t.get("suggested")]
+    if discovery.login_mode == Discovery.LoginMode.TEST_ACCOUNT:
+        from testaccounts.services import account_count
+        segments = split_segments(account_count(project))
+    else:
+        segments = [dict(s) for s in catalog.DEFAULT_SEGMENTS]
     return TestPlan.objects.create(
         project=project, discovery=discovery, created_by=user,
         task_ids=task_ids,
         task_funnels=[catalog.default_funnel(t) for t in task_ids],
-        segments=[dict(s) for s in catalog.DEFAULT_SEGMENTS],
+        segments=segments,
         limits=dict(catalog.DEFAULT_LIMITS),
     )
 
@@ -99,10 +124,11 @@ def _apply_segments(plan, segments):
     if [s["id"] for s in segments] != catalog.SEGMENT_IDS:
         raise validation_error("segments", f"세그먼트 {len(catalog.SEGMENT_IDS)}개를 순서대로 보내주세요.")
     total = sum(s["count"] for s in segments)
-    if total != catalog.PERSONA_TOTAL:
-        # Figma P05e 문구
+    expected = persona_total(plan)
+    if total != expected:
+        # Figma P05e 문구 (테스트 계정이면 계정 수에 맞춘다, P05h)
         raise ApiError(422, "VALIDATION_ERROR",
-                       f"합계가 {catalog.PERSONA_TOTAL}명이 되도록 맞춰주세요 · 지금 {total}명",
+                       f"합계가 {expected}명이 되도록 맞춰주세요 · 지금 {total}명",
                        {"segments": [f"지금 {total}명"]})
     plan.segments = [{"id": s["id"], "count": s["count"]} for s in segments]
 
@@ -151,7 +177,12 @@ def blocking_reasons(plan):
         reasons.append({"step": 2, "code": "NO_AUDIENCE", "message": "타겟 고객 설명을 입력해주세요."})
     if {f["task_id"] for f in plan.task_funnels} != set(plan.task_ids):
         reasons.append({"step": 3, "code": "FUNNEL_MISMATCH", "message": "과업과 퍼널이 맞지 않습니다."})
-    if sum(s["count"] for s in plan.segments) != catalog.PERSONA_TOTAL:
+    if uses_test_accounts(plan):
+        from testaccounts.services import MIN_ACCOUNTS, account_count
+        if account_count(plan.project) < MIN_ACCOUNTS:
+            reasons.append({"step": 1, "code": "TEST_ACCOUNTS_REQUIRED",
+                            "message": f"테스트 계정을 {MIN_ACCOUNTS}개 이상 등록해주세요."})
+    if sum(s["count"] for s in plan.segments) != persona_total(plan):
         reasons.append({"step": 3, "code": "SEGMENT_TOTAL", "message": "세그먼트 합계가 맞지 않습니다."})
     return reasons
 
@@ -214,6 +245,9 @@ def confirm_plan(plan_id, revision, user):
     snapshot.save()
     generator, segments, personas = create_personas(snapshot, plan.audience_context, plan.ages, plan.segments)
     snapshot.persona_generator = generator
+    if uses_test_accounts(plan):
+        from testaccounts.services import snapshot_accounts
+        data["test_accounts"] = snapshot_accounts(plan.project, personas)   # 페르소나 ↔ 계정 짝 (비밀번호 없음)
     snapshot.data = {
         **data,
         "persona_generator": generator,
@@ -232,7 +266,7 @@ def plan_dict(plan):
         "id": str(plan.id), "project_id": plan.project_id, "discovery_id": str(plan.discovery_id),
         "revision": plan.revision,
         "options": {"features": plan.discovery.features, "tasks": plan.discovery.tasks,
-                    "capabilities": catalog.capabilities()},
+                    "capabilities": {**catalog.capabilities(), "persona_total": persona_total(plan)}},
         "task_ids": plan.task_ids, "custom_tasks": plan.custom_tasks,
         "additional_request": plan.additional_request,
         "audience": {"context": plan.audience_context, "ages": plan.ages},
