@@ -66,6 +66,9 @@ chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
 | `DJANGO_STATIC_ROOT` | `/srv/exitplain/static` | **Nginx `/static/` alias와 같아야 한다.** 안 맞으면 admin 화면 CSS가 404 |
 | `DJANGO_DB_PATH` | `/srv/exitplain/data/db.sqlite3` | 없으면 `backend/db.sqlite3` |
 | `DJANGO_HTTPS` | HTTPS를 붙인 뒤 `True` | 보안 쿠키·프록시 헤더가 켜진다 |
+| `GOOGLE_OAUTH_CLIENT_ID` | 구글 로그인 클라이언트 ID | FE와 같은 값. 구글은 https 도메인만 등록 가능 (IP·http 불가, localhost 예외) |
+| `EMAIL_HOST_USER` | 로그인 코드 메일을 보낼 Gmail 주소 | 비우면 메일을 보내지 않고 로그에만 찍는다 |
+| `EMAIL_HOST_PASSWORD` | 그 Gmail의 **앱 비밀번호**(16자리) | 구글 계정 비밀번호가 아님. 2단계 인증을 켜야 만들 수 있다 |
 
 ## 4. `settings.py` 반영 내용 (`a/deploy-settings` 브랜치, 문서 규칙상 PR로 머지)
 위 3절의 환경변수를 `settings.py`가 읽도록 이미 반영했다. 환경변수가 없으면 로컬 개발 기본값으로 동작한다.

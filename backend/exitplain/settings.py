@@ -160,11 +160,29 @@ STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', BASE_DIR / 'staticfiles')
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# EMAIL_HOST_USER가 있으면 실제로 메일을 보낸다(기본 Gmail SMTP). 없으면 메일 내용을 콘솔(로그)에만 찍는다 (로컬 개발용)
+# Gmail: 2단계 인증을 켠 계정의 '앱 비밀번호'(16자리)를 EMAIL_HOST_PASSWORD에 넣는다. 구글 계정 비밀번호가 아님
+_smtp_user = os.environ.get('EMAIL_HOST_USER', '')   # 소문자 변수: Django 6.1은 MAILERS와 옛 EMAIL_* 설정을 같이 못 씀
+if _smtp_user:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.smtp.EmailBackend',
+            'OPTIONS': {
+                'host': os.environ.get('EMAIL_HOST', 'smtp.gmail.com'),
+                'port': int(os.environ.get('EMAIL_PORT', 587)),
+                'username': _smtp_user,
+                'password': os.environ.get('EMAIL_HOST_PASSWORD', ''),
+                'use_tls': True,
+                'timeout': 10,
+            },
+        },
+    }
+else:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        },
+    }
 
 # --- 백엔드 B: 새 테스트 위저드 설정 ---
 # TestPlan·Discovery가 참조할 프로젝트 모델. 백엔드 A의 모델 경로로 바꾼다.
@@ -188,7 +206,9 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 EXITPLAIN_LOGIN_CODE_TTL_SECONDS = 600
 EXITPLAIN_LOGIN_CODE_RESEND_SECONDS = 60
 EXITPLAIN_LOGIN_CODE_MAX_ATTEMPTS = 5
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Exitplain <no-reply@exitplain.local>')
+# 보내는 사람. Gmail은 로그인한 계정 주소로만 보낼 수 있어서 EMAIL_HOST_USER(환경변수)가 있으면 그 주소를 쓴다
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL') or (
+    f'Exitplain <{_smtp_user}>' if _smtp_user else 'Exitplain <no-reply@exitplain.local>')
 # Google 로그인: Google Cloud Console에서 발급한 OAuth 클라이언트 ID (프론트와 같은 값)
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
 
