@@ -28,10 +28,11 @@ class DiscoveryTests(WizardMixin, TestCase):
         res = self.client.post(f"/api/v1/projects/{self.project.id}/discoveries", {"foo": 1}, format="json")
         self.assertIn("foo", res.json()["error"]["fields"])
 
-    def test_login_connection_not_supported_yet(self, _):
+    def test_test_account_mode_needs_accounts(self, _):
+        # 테스트 계정이 4개 미만이면 시작할 수 없다 (계정 등록은 testaccounts 테스트에서 확인)
         res = self.client.post(f"/api/v1/projects/{self.project.id}/discoveries",
                                {"login_mode": "test_account"}, format="json")
-        self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "LOGIN_CONNECTION_UNAVAILABLE"))
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "TEST_ACCOUNTS_REQUIRED"))
 
     def test_site_unreachable_is_503(self, mock):
         mock.side_effect = RuntimeError("browser crashed")

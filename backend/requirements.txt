@@ -6,3 +6,4 @@ sqlparse==0.6.1
 tzdata==2026.6
 google-auth>=2.30
 requests>=2.31
+cryptography>=42

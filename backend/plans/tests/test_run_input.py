@@ -61,7 +61,7 @@ class RunInputTests(WizardMixin, TestCase):
         snap = self.confirm()
         res = self.client.get(f"/api/v1/plan-revisions/{snap['plan_revision_id']}/run-inputs").json()
         self.assertEqual(len(res["items"]), 6)
-        self.assertEqual(len(res["not_passed_to_agent"]), 2)
+        self.assertEqual(len(res["not_passed_to_agent"]), 3)
         self.assertTrue(res["not_passed_to_agent"][1].startswith("limits.cost_cap"))
 
     @override_settings(EXITPLAIN_APPEND_DEMO_QUERY=False)
