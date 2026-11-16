@@ -124,7 +124,8 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             point = meter.observe(stage, obs["required_fields"], obs["text"],
                                                   obs.get("cost_warning_boxes", []), last_action, obs["elements"],
                                                   config.viewport_width, wait_seconds)
-                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"], "stage": stage,
+                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"],
+                                "title": (obs.get("title") or "")[:200], "stage": stage,
                                 "artifact": artifact, "required_fields": obs["required_fields"], "text": obs["text"],
                                 "frustration_score": point["score"], "frustration_threshold": point["threshold"]})
                             # Independent environment predicate; model's completion claim is ignored.
