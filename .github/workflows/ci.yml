@@ -49,3 +49,54 @@ jobs:
 
       - name: 테스트
         run: python manage.py test
+
+  # 같은 테스트를 PostgreSQL 에서도 돌린다. SQLite 에서는 통과하지만 PostgreSQL 에서만 깨지는 코드
+  # (예: select_for_update 와 외부 조인, 대소문자·정렬 차이)를 서버 전환 전에 찾기 위한 검사다.
+  backend-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: exitplain
+          POSTGRES_USER: exitplain
+          POSTGRES_PASSWORD: ci-only-password   # CI 임시 컨테이너 전용 값. 운영 비밀번호가 아니다
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U exitplain"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: ..
+      DB_ENGINE: postgres
+      DB_NAME: exitplain
+      DB_USER: exitplain
+      DB_PASSWORD: ci-only-password
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            requirements.lock
+
+      - name: 패키지 설치
+        working-directory: .
+        run: pip install -r backend/requirements.txt -r requirements.lock
+
+      - name: 마이그레이션 적용 (PostgreSQL)
+        run: python manage.py migrate --noinput
+
+      - name: 테스트 (PostgreSQL)
+        run: python manage.py test

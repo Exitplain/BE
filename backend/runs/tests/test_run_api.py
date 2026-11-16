@@ -318,15 +318,14 @@ class ScreenshotTests(ApiBase):
         self.assertEqual(res["Content-Type"], "image/png")
         self.assertEqual(b"".join(res.streaming_content), PNG_BYTES)
         self.assertIn("private", res["Cache-Control"])
-        res.close()
         final = self.client.get(f"/api/v1/sessions/{self.mine.pk}/final-screenshot")
         self.assertEqual((final.status_code, final["Content-Type"]), (200, "image/png"))
-        final.close()
+        b"".join(final.streaming_content)
 
     def test_browser_image_accept_header_is_not_a_406(self):
         res = self.client.get(self.url, HTTP_ACCEPT="image/png")
         self.assertEqual(res.status_code, 200)
-        res.close()
+        b"".join(res.streaming_content)
 
     def test_other_users_and_anonymous_cannot_see_it(self):
         self.assertEqual(self.stranger.get(self.url).status_code, 403)
@@ -394,7 +393,7 @@ class EndToEndTests(WizardMixin, TestCase):
         self.assertEqual((tiles["total"], len(tiles["items"])), (120, 120))
         shot = self.client.get(tiles["items"][0]["latest_observation"]["screenshot_url"])
         self.assertEqual((shot.status_code, shot["Content-Type"]), (200, "image/png"))
-        shot.close()
+        b"".join(shot.streaming_content)
         events = self.client.get(f"/api/v1/runs/{run_id}/events?limit=500").json()
         self.assertTrue(events["has_more"])  # 이벤트가 500개보다 많다
         self.assertNotIn(tmp.name.replace("\\", "\\\\"), json.dumps(events))

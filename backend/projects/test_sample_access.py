@@ -87,7 +87,7 @@ class GuestAccessTests(RunsFixtureMixin, TestCase):
     def test_guest_can_see_sample_screenshots(self):
         res = self.guest.get(f"/api/v1/observations/{self.observation.pk}/screenshot")
         self.assertEqual(res.status_code, 200)
-        res.close()
+        b"".join(res.streaming_content)
 
     def test_guest_cannot_read_private_projects_or_runs(self):
         for path in (f"/api/v1/projects/{self.private.pk}", f"/api/v1/projects/{self.private.pk}/runs",
