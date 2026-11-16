@@ -1,0 +1,19 @@
+[Unit]
+Description=Exitplain run worker (agent subprocess launcher)
+After=network.target exitplain-web.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/exitplain/BE/backend
+EnvironmentFile=/srv/exitplain/.env
+# agent 패키지는 레포 루트에 있어서 PYTHONPATH가 필요하다.
+Environment=PYTHONPATH=/srv/exitplain/BE
+ExecStart=/srv/exitplain/venv/bin/python manage.py run_worker
+Restart=on-failure
+RestartSec=5
+# 메모리가 부족하면 sshd·gunicorn보다 워커(와 그 자식 Chromium)를 먼저 종료시킨다.
+OOMScoreAdjust=300
+
+[Install]
+WantedBy=multi-user.target

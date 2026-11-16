@@ -15,7 +15,8 @@ def main():
     parser.add_argument("--demo", choices=["normal", "problem", "fixed"])
     parser.add_argument("--shop", choices=["normal", "problem", "fixed"])
     parser.add_argument("--case", choices=["all", "signup", "fee", "cta"], default="all")
-    parser.add_argument("--policy", choices=["scripted", "openai"], default="scripted")
+        # shop_scripted: 데모 쇼핑몰 화면 문구를 아는 고정 정책. 백엔드가 --input으로 쇼핑몰을 돌릴 때 쓴다 (API 키 불필요)
+    parser.add_argument("--policy", choices=["scripted", "shop_scripted", "openai"], default="scripted")
     parser.add_argument("--model", help="Required for openai; exact model ID available to your account")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--output", default="artifacts")
@@ -26,7 +27,12 @@ def main():
         parser.error("repeat must be 1..100")
     if args.policy == "openai" and not args.model:
         parser.error("--model is required for model-driven execution")
-    factory = (ShopScriptedPolicy if args.shop else ScriptedPolicy) if args.policy == "scripted" else lambda: OpenAIPolicy(args.model)
+        if args.policy == "openai":
+            factory = lambda: OpenAIPolicy(args.model)
+    elif args.policy == "shop_scripted" or args.shop:
+        factory = ShopScriptedPolicy
+    else:
+        factory = ScriptedPolicy
     # Fail before launching a browser if authentication is unavailable.
     if args.policy == "openai":
         import os

@@ -9,7 +9,8 @@ https://docs.djangoproject.com/en/6.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
-
+import os
+import sys
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -19,13 +20,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-glmr8$asd7b=bj(z$gy4ljyg#tn7bpo_-p$m_mt(-*2=3#b4)3'
+def _env_list(name):
+    return [v.strip() for v in os.environ.get(name, '').split(',') if v.strip()]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+def _env_bool(name, default=False):
+    return os.environ.get(name, str(default)).strip().lower() in ('1', 'true', 'yes')
+
+
+_DEV_SECRET_KEY = 'django-insecure-dev-only-do-not-use-in-production'
+
+# 환경변수가 없으면 로컬 개발용 기본값으로 동작한다. 서버에서는 .env로 반드시 덮어쓴다.
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _DEV_SECRET_KEY)
+
+DEBUG = _env_bool('DJANGO_DEBUG', True)
+
+# 운영(DEBUG=False)에서 개발용 키가 그대로 쓰이는 사고를 막는다.
+if not DEBUG and SECRET_KEY == _DEV_SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured('DEBUG=False 에서는 DJANGO_SECRET_KEY 환경변수가 필요합니다.')
+
+ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS')
+CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS')
+
+# HTTPS(도메인 + certbot)를 붙인 뒤 DJANGO_HTTPS=True 로 켠다.
+if _env_bool('DJANGO_HTTPS'):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 # Application definition
@@ -37,10 +59,22 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'corsheaders',
+    'common',
+    'projects',  
+    'discoveries',
+    'plans',
+    'personas',
+    'reports',
+    'accounts',
+    'runs',
+    'testaccounts',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CommonMiddleware 보다 앞에 둔다
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -75,7 +109,13 @@ WSGI_APPLICATION = 'exitplain.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get('DJANGO_DB_PATH', BASE_DIR / 'db.sqlite3'),
+        # 웹(gunicorn)과 워커가 동시에 쓰므로 'database is locked'를 줄이는 설정.
+        'OPTIONS': {
+            'timeout': 20,
+            'init_command': 'PRAGMA journal_mode=WAL;',
+            'transaction_mode': 'IMMEDIATE',
+        },
     }
 }
 
@@ -115,13 +155,108 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# collectstatic 결과물 위치 (Nginx 의 /static/ alias 와 같은 경로)
+STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', BASE_DIR / 'staticfiles')
 
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# EMAIL_HOST_USER가 있으면 실제로 메일을 보낸다(기본 Gmail SMTP). 없으면 메일 내용을 콘솔(로그)에만 찍는다 (로컬 개발용)
+# Gmail: 2단계 인증을 켠 계정의 '앱 비밀번호'(16자리)를 EMAIL_HOST_PASSWORD에 넣는다. 구글 계정 비밀번호가 아님
+_smtp_user = os.environ.get('EMAIL_HOST_USER', '')   # 소문자 변수: Django 6.1은 MAILERS와 옛 EMAIL_* 설정을 같이 못 씀
+if _smtp_user:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.smtp.EmailBackend',
+            'OPTIONS': {
+                'host': os.environ.get('EMAIL_HOST', 'smtp.gmail.com'),
+                'port': int(os.environ.get('EMAIL_PORT', 587)),
+                'username': _smtp_user,
+                'password': os.environ.get('EMAIL_HOST_PASSWORD', ''),
+                'use_tls': True,
+                'timeout': 10,
+            },
+        },
+    }
+else:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        },
+    }
+
+# --- 백엔드 B: 새 테스트 위저드 설정 ---
+# TestPlan·Discovery가 참조할 프로젝트 모델. 백엔드 A의 모델 경로로 바꾼다.
+EXITPLAIN_PROJECT_MODEL = 'projects.Project'
+# 사이트 확인(탐색) 결과 유효 시간(초). docs/API_SPEC.md 4.1의 15분과 같음
+EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
+# 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
+EXITPLAIN_PERSONA_GENERATOR = None
+# 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
+EXITPLAIN_APPEND_DEMO_QUERY = True
+# 에이전트 실행 결과 폴더 (agent.execute_run의 output_dir). 세션 상세가 여기서 events.jsonl을 읽는다
+EXITPLAIN_RUN_OUTPUT_DIR = os.environ.get('EXITPLAIN_RUN_OUTPUT_DIR', str(BASE_DIR.parent / 'artifacts'))
+
+# --- 백엔드 B: 로그인·세션 (accounts) ---
+# 로그인 유지 시간(초). 요청할 때마다 다시 늘어난다(마지막 사용 후 이 시간이 지나면 만료 → L09 세션 만료 모달)
+SESSION_COOKIE_AGE = int(os.environ.get('SESSION_COOKIE_AGE', 60 * 60 * 8))
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+# 이메일 로그인 코드: 유효 10분, 재전송 60초 뒤, 입력 5번까지
+EXITPLAIN_LOGIN_CODE_TTL_SECONDS = 600
+EXITPLAIN_LOGIN_CODE_RESEND_SECONDS = 60
+EXITPLAIN_LOGIN_CODE_MAX_ATTEMPTS = 5
+# 보내는 사람. Gmail은 로그인한 계정 주소로만 보낼 수 있어서 EMAIL_HOST_USER(환경변수)가 있으면 그 주소를 쓴다
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL') or (
+    f'Exitplain <{_smtp_user}>' if _smtp_user else 'Exitplain <no-reply@exitplain.local>')
+# Google 로그인: Google Cloud Console에서 발급한 OAuth 클라이언트 ID (프론트와 같은 값)
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
+# --- 백엔드 A: 실행 (runs) ---
+# 스크린샷·events.jsonl 저장 위치. 커밋 금지(artifacts/ 는 .gitignore 대상)
+# B 의 세션 상세는 EXITPLAIN_RUN_OUTPUT_DIR 에서 events.jsonl 을 읽으므로 같은 폴더를 쓴다 (기본 BE/artifacts)
+ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RUN_OUTPUT_DIR')
+                 or str(BASE_DIR.parent / 'artifacts'))
+# 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
+AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
+# shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
+AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
+
+# 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
+TEST_ACCOUNT_KEY = os.environ.get('TEST_ACCOUNT_KEY', '')
+AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
+# 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
+ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]
+# 프로젝트마다 동시에 진행할 수 있는 실행 수 (0 이면 제한 없음)
+EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT = int(os.environ.get('EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT', 1))
+# 워커 한 대가 동시에 띄울 에이전트 프로세스 수. t3.small(2GiB)에서는 1 을 권장
+EXITPLAIN_WORKER_PROCESSES = int(os.environ.get('EXITPLAIN_WORKER_PROCESSES', 1))
+# 실행이 모두 끝난 뒤 호출할 집계 함수의 경로("앱.모듈:함수"). B의 리포트 집계 함수가 정해지면 연결한다. None 이면 건너뜀
+EXITPLAIN_FINALIZE_HOOK = os.environ.get('EXITPLAIN_FINALIZE_HOOK') or 'reports.services:finalize_run'
+# 로그인 전 둘러보기(L06)용 샘플 프로젝트. manage.py seed_sample_project 가 이 값을 쓴다
+SAMPLE_PROJECT_URL = os.environ.get('SAMPLE_PROJECT_URL', 'https://banchanroad.example/')
+# 샘플 프로젝트의 소유자(로그인 불가 시스템 계정)
+SAMPLE_OWNER_EMAIL = os.environ.get('SAMPLE_OWNER_EMAIL', 'sample@exitplain.invalid')
+
+# --- 프런트를 다른 주소에서 띄울 때(CORS) ---
+# 같은 주소로 서비스하면(Nginx 프록시, Vercel rewrites) 아래 값은 필요 없다. 비워 두면 다른 출처 요청은 모두 막힌다.
+# 예) CORS_ALLOWED_ORIGINS=http://localhost:5173,https://exitplain.vercel.app  (콤마로 구분, 끝에 / 없이)
+#     같은 주소들을 CSRF_TRUSTED_ORIGINS 에도 넣어야 POST·PATCH 가 통과한다.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)  # 로그인 쿠키를 주고받기 위해 (허용 출처가 있을 때만)
+CORS_URLS_REGEX = r'^/api/.*$'                       # API 만. /admin/ 등은 대상이 아니다
+CORS_ALLOW_HEADERS = (*default_headers, 'idempotency-key', 'if-match')  # 실행 생성, 계획 수정에 쓰는 요청 헤더
+CORS_EXPOSE_HEADERS = ['ETag', 'Idempotent-Replayed', 'Content-Disposition']  # 프런트가 읽어야 하는 응답 헤더
+
+# 프런트가 다른 '사이트'(예: localhost, vercel.app)에서 직접 API 를 부를 때만 켠다.
+# 쿠키를 다른 사이트로도 보내려면 SameSite=None; Secure 여야 하므로 DJANGO_HTTPS 도 함께 켜져 있어야 한다.
+# Safari 등은 다른 사이트 쿠키를 막으니, 가능하면 Vercel rewrites 나 같은 사이트(app.exitplain.store)를 쓴다.
+if _env_bool('DJANGO_CROSS_SITE_COOKIES'):
+    SESSION_COOKIE_SAMESITE = 'None'
+    CSRF_COOKIE_SAMESITE = 'None'
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True

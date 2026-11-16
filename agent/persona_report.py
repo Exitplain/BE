@@ -9,6 +9,8 @@ STAGES={'landing':'랜딩','product':'상품 상세','cart':'장바구니','sign
         'delivery':'배송 지역 조회','benefits':'쿠폰 혜택','coupon':'쿠폰 발급','account':'내 구독',
         'subscription':'배송 일정 변경','complete':'과업 완료'}
 CATEGORIES={'input_burden':'필수 입력 부담','navigation':'탐색 부담','cost':'늦은 배송비 노출'}
+# runtime(agent/behavior.py)이 새로 내는 원인. 기존 3종의 이름은 이 리포트 화면 테스트가 쓰고 있어 그대로 둔다.
+CATEGORIES.update({'value':'가치 불명확','trust':'신뢰 부족','technical':'기술 오류·지연','accessibility':'접근성 장벽'})
 TECHNICAL={'agent_failure','site_failure','budget_exceeded','cancelled','blocked_auth'}
 
 
