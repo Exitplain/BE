@@ -23,6 +23,7 @@ TECH = ("agent_failure", ["/", "/product"])
 
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class ReportTests(WizardMixin, TestCase):
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 페르소나 20명·시드 3회 기준으로 쓴 테스트
     def setUp(self):
         super().setUp()
         self.tmp = tempfile.TemporaryDirectory()

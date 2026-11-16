@@ -31,6 +31,7 @@ class TestAccount(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.UNCHECKED)
     status_message = models.CharField(max_length=200, blank=True, default="")
     checked_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)   # 실행에 마지막으로 쓰인 때 (보관 기간 계산용)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -40,3 +41,28 @@ class TestAccount(models.Model):
 
     def __str__(self):
         return f"{self.position}. {self.username}"
+
+
+class TestAccountEvent(models.Model):
+    """감사 기록: 누가·언제·어느 프로젝트의 테스트 계정을 등록·수정·삭제·사용했는지. 비밀번호는 절대 남기지 않는다."""
+
+    class Action(models.TextChoices):
+        ADDED = "added", "등록"
+        UPDATED = "updated", "수정"
+        REMOVED = "removed", "삭제"
+        USED = "used", "실행에 사용"
+        CHECKED = "checked", "로그인 확인"
+        EXPIRED = "expired", "보관 기간 지나 자동 삭제"
+
+    project = models.ForeignKey("projects.Project", on_delete=models.CASCADE, related_name="test_account_events")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                              related_name="+")              # 시스템(실행·자동 삭제)이면 비어 있음
+    action = models.CharField(max_length=10, choices=Action.choices)
+    account_id = models.UUIDField(null=True, blank=True)     # 계정이 지워져도 기록은 남도록 FK가 아니라 값으로 둔다
+    username = models.CharField(max_length=200)
+    detail = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["project", "-created_at"])]

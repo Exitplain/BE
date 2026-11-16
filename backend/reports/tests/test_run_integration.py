@@ -23,6 +23,7 @@ FAKE_AGENT = str(Path(__file__).resolve().parents[2] / "runs" / "tests" / "fake_
 
 
 class RunReportTests(WizardMixin, TestCase):
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 페르소나 20명·시드 3회 기준으로 쓴 테스트
     def setUp(self):
         super().setUp()
         tmp = tempfile.TemporaryDirectory()

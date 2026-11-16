@@ -253,6 +253,12 @@ AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
 
 # 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
 TEST_ACCOUNT_KEY = os.environ.get('TEST_ACCOUNT_KEY', '')
+# AWS KMS 키 (ARN 또는 alias/이름). 넣으면 테스트 계정 비밀번호를 KMS 봉투 암호화로 저장한다. 비우면 위 Fernet 키를 쓴다
+# 서버(EC2)의 IAM 역할에 이 키의 kms:GenerateDataKey·kms:Decrypt 권한이 있어야 한다 (액세스 키를 .env에 넣지 않는다)
+TEST_ACCOUNT_KMS_KEY_ID = os.environ.get('TEST_ACCOUNT_KMS_KEY_ID', '')
+TEST_ACCOUNT_KMS_REGION = os.environ.get('TEST_ACCOUNT_KMS_REGION', 'ap-northeast-2')
+# 테스트 계정 보관 기간(일). 마지막으로 쓰이거나 바뀐 뒤 이 기간이 지나면 manage.py purge_test_accounts 가 지운다
+TEST_ACCOUNT_RETENTION_DAYS = int(os.environ.get('TEST_ACCOUNT_RETENTION_DAYS', 90))
 AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
 # 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
 ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]

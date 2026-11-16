@@ -1,6 +1,7 @@
 """테스트 계정 API (Figma P04 테스트 계정 등록).
 
-GET /api/v1/projects/{id}/test-accounts   계정 목록 (비밀번호 없음)
+GET /api/v1/projects/{id}/test-accounts          계정 목록 (비밀번호 없음, 계정별 자동 삭제 예정일 expires_at)
+GET /api/v1/projects/{id}/test-accounts/events   감사 기록
 PUT /api/v1/projects/{id}/test-accounts   계정 목록 전체 저장
     {login_url?, accounts: [{id?, username, password?}]}   (최대 20개, 보낸 순서 = 페르소나 짝 순서)
 """
@@ -31,6 +32,13 @@ class AccountItemSerializer(StrictSerializer):
 class AccountsSerializer(StrictSerializer):
     login_url = serializers.CharField(max_length=500, required=False, allow_blank=True)
     accounts = AccountItemSerializer(many=True)
+
+
+class ProjectTestAccountEventView(BaseAPIView):
+    """GET /api/v1/projects/{id}/test-accounts/events  감사 기록 최근 100개 (소유자만)"""
+
+    def get(self, request, project_id):
+        return Response(services.events_dict(get_owned_project(request.user, project_id)))
 
 
 class ProjectTestAccountView(BaseAPIView):

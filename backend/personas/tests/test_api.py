@@ -22,7 +22,7 @@ class PersonaTests(WizardMixin, TestCase):
         snap = self.confirm()
         res = self.client.get(f"/api/v1/plan-revisions/{snap['plan_revision_id']}/personas").json()
         self.assertEqual([s["name"] for s in res["segments"]], ["빠른 구매형", "꼼꼼한 비교형", "가격 민감형", "신중한 첫 방문형"])
-        self.assertEqual(len(res["items"]), 20)
+        self.assertEqual(len(res["items"]), 10)
         p1 = res["items"][0]
         self.assertEqual((p1["code"], p1["is_representative"]), ("P-001", True))
         self.assertIn("타겟: 퇴근 후", p1["context"])

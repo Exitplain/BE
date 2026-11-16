@@ -21,6 +21,12 @@ def fake_discovery(variant):
 class WizardMixin:
     """setUp에서 사용자 2명·프로젝트 1개를 만들고 위저드를 단계별로 진행하는 도우미."""
 
+    # 계획 기본값은 페르소나 10명·시드 1회다. 집계·실행 테스트는 숫자를 그대로 두려고
+    # 클래스에 PLAN_SIZE = WizardMixin.FULL_SIZE 를 넣어 예전 크기(20명·시드 3회)로 만든다.
+    FULL_SIZE = {"segments": [{"id": f"segment_{i}", "count": 5} for i in range(1, 5)],
+                 "limits": {"seed_count": 3}}
+    PLAN_SIZE = None
+
     def setUp(self):
         User = get_user_model()
         self.user = User.objects.create_user("daeun", password="pw")
@@ -40,6 +46,9 @@ class WizardMixin:
         res = self.client.post(f"/api/v1/projects/{self.project.id}/plans",
                                {"discovery_id": discovery["id"]}, format="json")
         self.assertEqual(res.status_code, 201, res.content)
+        if self.PLAN_SIZE:
+            res = self.patch(res.json(), self.PLAN_SIZE)
+            self.assertEqual(res.status_code, 200, res.content)
         return res.json()
 
     def patch(self, plan, body, revision=None):
