@@ -33,7 +33,7 @@ class ReportTests(WizardMixin, TestCase):
         super().tearDown()
 
     def snapshot(self, seed_count=1, tasks=("order",)):
-        plan = self.patch(self.create_plan(), {**self.STEP2, "task_ids": list(tasks)}).json()
+        plan = self.patch(self.create_plan(), {**self.STEP2, **self.PANEL_20, "task_ids": list(tasks)}).json()
         plan = self.patch(plan, {"limits": {"seed_count": seed_count}}).json()
         return PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
 

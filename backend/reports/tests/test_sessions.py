@@ -31,7 +31,7 @@ class SessionApiTests(WizardMixin, TestCase):
         super().tearDown()
 
     def make_report(self, run_ref="run1", outcomes=None):
-        plan = self.patch(self.create_plan(), {**self.STEP2, "task_ids": ["order"]}).json()
+        plan = self.patch(self.create_plan(), {**self.STEP2, **self.PANEL_20, "task_ids": ["order"]}).json()
         plan = self.patch(plan, {"limits": {"seed_count": 1}}).json()
         snap = PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
         for item in build_run_inputs(snap, run_id=run_ref):

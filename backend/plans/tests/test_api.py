@@ -17,7 +17,9 @@ class PlanCreateTests(WizardMixin, TestCase):
         plan = self.create_plan()
         self.assertEqual(plan["revision"], 1)
         self.assertEqual(plan["task_ids"], list(DEFAULT_TASK_IDS))
-        self.assertEqual([s["count"] for s in plan["segments"]], [5, 5, 5, 5])
+        self.assertEqual([s["count"] for s in plan["segments"]], [3, 3, 2, 2])   # 기본 10명
+        self.assertEqual((plan["options"]["capabilities"]["persona_total"],
+                          plan["options"]["capabilities"]["persona_total_options"]), (10, [10, 20]))
         self.assertEqual(plan["limits"]["concurrency"], 5)   # Figma 동시 5세션
         funnel = plan["task_funnels"][0]
         self.assertTrue(funnel["auto"])                                   # Figma P05c: 사이트 분석으로 자동 결정
@@ -86,9 +88,20 @@ class PlanStep3Tests(WizardMixin, TestCase):
         plan = self.ready_plan()
         segs = [{"id": f"segment_{i}", "count": c} for i, c in enumerate([5, 5, 5, 4], 1)]
         res = self.patch(plan, {"segments": segs})
-        self.assertEqual(res.json()["error"]["message"], "합계가 20명이 되도록 맞춰주세요 · 지금 19명")
+        self.assertEqual(res.json()["error"]["message"], "합계가 10명 또는 20명이 되도록 맞춰주세요 · 지금 19명")
         segs[3]["count"], segs[0]["count"] = 4, 6
         self.assertEqual(self.patch(plan, {"segments": segs}).status_code, 200)
+
+    def test_default_ten_personas_and_twenty_by_choice(self, _):
+        plan = self.create_plan()
+        plan = self.patch(plan, self.STEP2).json()
+        self.assertEqual((plan["review"]["blocking"], plan["review"]["total_sessions"]), ([], 10 * 2 * 1))
+        snap = self.confirm(plan)
+        self.assertEqual((len(snap["data"]["personas"]), snap["data"]["total_sessions"]), (10, 20))
+        # 20명으로 바꾸면 그대로 확정된다
+        plan = self.patch(self.client.get(f"/api/v1/plans/{snap['plan_id']}").json(), self.PANEL_20).json()
+        self.assertEqual(plan["options"]["capabilities"]["persona_total"], 20)
+        self.assertEqual(len(self.confirm(plan)["data"]["personas"]), 20)
 
     def test_limits_and_frustration(self, _):
         plan = self.ready_plan()
@@ -112,7 +125,7 @@ class ConfirmationTests(WizardMixin, TestCase):
     def test_review_summary(self, _):
         review = self.ready_plan()["review"]
         self.assertEqual(review["blocking"], [])
-        self.assertEqual(review["total_sessions"], 20 * 2 * 1)       # 페르소나 × 과업 × 기본 시드 1
+        self.assertEqual(review["total_sessions"], 20 * 2 * 1)       # 고른 20명 × 과업 2 × 기본 시드 1
 
     def test_confirm_creates_immutable_snapshot(self, _):
         snap = self.confirm()

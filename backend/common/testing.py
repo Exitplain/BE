@@ -50,8 +50,11 @@ class WizardMixin:
              "additional_request": "쿠폰 적용 후 총액이 바로 보이는지",
              "audience": {"context": "퇴근 후 모바일로 저녁 반찬을 처음 주문하는 1~2인 가구", "ages": ["30s"]}}
 
+    # 페르소나 기본값은 10명(3·3·2·2)이다. 결과 집계를 20명 기준 데이터로 보는 테스트는 20명을 고른다.
+    PANEL_20 = {"segments": [{"id": f"segment_{i}", "count": 5} for i in range(1, 5)]}
+
     def ready_plan(self):
-        res = self.patch(self.create_plan(), self.STEP2)
+        res = self.patch(self.create_plan(), {**self.STEP2, **self.PANEL_20})
         self.assertEqual(res.status_code, 200, res.content)
         return res.json()
 

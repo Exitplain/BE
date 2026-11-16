@@ -50,12 +50,21 @@ def uses_test_accounts(plan):
     return plan.discovery.login_mode == Discovery.LoginMode.TEST_ACCOUNT
 
 
-def persona_total(plan):
-    """확정할 페르소나 수. 로그인 없이 테스트하면 20명, 테스트 계정으로 테스트하면 계정 수 (Figma P05h)."""
+def persona_totals(plan):
+    """고를 수 있는 페르소나 수. 로그인 없이 테스트하면 10명 또는 20명, 테스트 계정으로 테스트하면 계정 수 (Figma P05h)."""
     if uses_test_accounts(plan):
         from testaccounts.services import account_count
-        return account_count(plan.project)
-    return catalog.PERSONA_TOTAL
+        return (account_count(plan.project),)
+    return catalog.PERSONA_TOTAL_OPTIONS
+
+
+def persona_total(plan):
+    """지금 계획의 페르소나 수. 세그먼트 합계가 고를 수 있는 값이면 그 값, 아니면 기본값(테스트 계정이면 계정 수)."""
+    totals = persona_totals(plan)
+    current = sum(s["count"] for s in plan.segments)
+    if current in totals:
+        return current
+    return totals[0] if uses_test_accounts(plan) else catalog.PERSONA_TOTAL
 
 
 def split_segments(total):
@@ -124,11 +133,12 @@ def _apply_segments(plan, segments):
     if [s["id"] for s in segments] != catalog.SEGMENT_IDS:
         raise validation_error("segments", f"세그먼트 {len(catalog.SEGMENT_IDS)}개를 순서대로 보내주세요.")
     total = sum(s["count"] for s in segments)
-    expected = persona_total(plan)
-    if total != expected:
+    totals = persona_totals(plan)
+    if total not in totals:
         # Figma P05e 문구 (테스트 계정이면 계정 수에 맞춘다, P05h)
+        expected = " 또는 ".join(f"{n}명" for n in totals)
         raise ApiError(422, "VALIDATION_ERROR",
-                       f"합계가 {expected}명이 되도록 맞춰주세요 · 지금 {total}명",
+                       f"합계가 {expected}이 되도록 맞춰주세요 · 지금 {total}명",
                        {"segments": [f"지금 {total}명"]})
     plan.segments = [{"id": s["id"], "count": s["count"]} for s in segments]
 
@@ -182,7 +192,7 @@ def blocking_reasons(plan):
         if account_count(plan.project) < MIN_ACCOUNTS:
             reasons.append({"step": 1, "code": "TEST_ACCOUNTS_REQUIRED",
                             "message": f"테스트 계정을 {MIN_ACCOUNTS}개 이상 등록해주세요."})
-    if sum(s["count"] for s in plan.segments) != persona_total(plan):
+    if sum(s["count"] for s in plan.segments) not in persona_totals(plan):
         reasons.append({"step": 3, "code": "SEGMENT_TOTAL", "message": "세그먼트 합계가 맞지 않습니다."})
     return reasons
 
@@ -266,7 +276,8 @@ def plan_dict(plan):
         "id": str(plan.id), "project_id": plan.project_id, "discovery_id": str(plan.discovery_id),
         "revision": plan.revision,
         "options": {"features": plan.discovery.features, "tasks": plan.discovery.tasks,
-                    "capabilities": {**catalog.capabilities(), "persona_total": persona_total(plan)}},
+                    "capabilities": {**catalog.capabilities(), "persona_total": persona_total(plan),
+                                     "persona_total_options": list(persona_totals(plan))}},
         "task_ids": plan.task_ids, "custom_tasks": plan.custom_tasks,
         "additional_request": plan.additional_request,
         "audience": {"context": plan.audience_context, "ages": plan.ages},
