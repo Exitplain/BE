@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
 from .behavior import PersonaMeter
-from .browser import observe, act, origin
+from .browser import observe, act, origin, login
 from .funnel import funnel_stage
 from .schemas import RunInput, SessionResult
 
@@ -24,12 +24,17 @@ ISSUE_SUMMARIES = {
 }
 
 
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_CONSECUTIVE_FAILURES = 3     # 행동이 연달아 이만큼 실패하면 기술 실패로 끝낸다
+
+
 async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None,
-                      judge=None):
+                      credentials=None, judge=None):
     """Call from a Django worker's async boundary; callbacks may be sync or async.
 
     Only trusted test sites are supported. Exact-origin routing is not an SSRF firewall.
     Each invocation creates a unique attempt directory; no existing evidence is overwritten.
+    credentials: {persona_id: {"username", "password"}} for config.login_url. Kept in memory only, never written.
     judge: success_criteria 판정기 (agent/judge.py). 정책이 done 을 고르면 화면을 따로 판정한다.
     """
     if config.success_criteria and judge is None:
@@ -71,14 +76,18 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
                              "calls": 0, "input": 0, "output": 0, "by_model": {}, "issues": [], "artifact": None,
-                             "judgments": 0}
+                             "judgments": 0, "blocked_writes": 0}
                     context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
                                                         service_workers="block")
                     policy = None
                     blocked = []
+                    logging_in = [config.login_url is not None]   # 로그인 요청(POST)은 read_only 여도 보낸다
                     async def guard(route):
                         if origin(route.request.url) not in config.allowed_origins:
                             blocked.append(route.request.url)
+                            await route.abort()
+                        elif config.read_only and not logging_in[0] and route.request.method not in SAFE_METHODS:
+                            state["blocked_writes"] += 1      # 운영 자료가 바뀌지 않게 쓰기 요청만 막는다
                             await route.abort()
                         else:
                             await route.continue_()
@@ -88,6 +97,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     page = await context.new_page()
                     page.set_default_timeout(5000)
                     history = []
+                    failures = [0]                    # 연속으로 실패한 행동 수
                     seen_signals = set()
                     meter = PersonaMeter(persona, config.seed)
                     last_action = None
@@ -126,6 +136,20 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             state.update(status="cancelled", reason="Cancellation requested")
                             return
                         policy = policy_factory()
+                        if config.login_url:
+                            account = (credentials or {}).get(persona.id)
+                            ok = False
+                            if account:
+                                try:
+                                    ok = await login(page, config.login_url, account["username"], account["password"])
+                                except Exception:
+                                    ok = False            # 예외 문구에 입력값이 섞이지 않게 내용은 버린다
+                            logging_in[0] = False
+                            await emit("login.completed", sid, {"ok": ok, "has_account": bool(account)})
+                            if not ok:
+                                state.update(status="blocked_auth",
+                                             reason="Test account login failed" if account else "No test account for persona")
+                                return
                         response = await page.goto(config.target_url, wait_until="domcontentloaded", timeout=15000)
                         if response and response.status >= 400:
                             state.update(status="site_failure", reason=f"HTTP {response.status}")
@@ -217,7 +241,24 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 last_action = "done"
                                 continue
                             acted = time.monotonic()
-                            await act(page, action, obs)
+                            try:
+                                await act(page, action, obs)
+                            except Exception as exc:
+                                # 처음 보는 사이트에서는 누를 수 없는 요소를 고를 수 있다. 세션을 바로 끝내지 않고
+                                # 실패를 행동 기록에 남겨 다음 스텝에서 정책이 다른 방법을 고르게 한다.
+                                # (예외 문구는 화면·입력값이 섞일 수 있어 종류만 남긴다)
+                                failures[0] += 1
+                                await emit("action.failed", sid, {"step_id": step_id, "action": action.model_dump(),
+                                                                  "error": type(exc).__name__})
+                                history.append({**action.model_dump(), "result": f"failed ({type(exc).__name__}): "
+                                                "this action could not be performed on the current screen"})
+                                last_action = "failed"
+                                if failures[0] >= MAX_CONSECUTIVE_FAILURES:
+                                    state.update(status="agent_failure",
+                                                 reason=f"{MAX_CONSECUTIVE_FAILURES} actions failed in a row")
+                                    return
+                                continue
+                            failures[0] = 0
                             history.append(action.model_dump())
                             last_action = action.kind
                             await emit("action.completed", sid, {"step_id": step_id, "action": action.model_dump()})
@@ -256,7 +297,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         input_tokens=state["input"], output_tokens=state["output"], usage_by_model=state["by_model"],
                         judgments=state["judgments"],
                         issues=state["issues"], final_artifact=state["artifact"],
-                        terminal_stage=stage, stages_reached=list(meter.stages))
+                        terminal_stage=stage, stages_reached=list(meter.stages), blocked_writes=state["blocked_writes"])
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
                     await emit("session.finished", sid, result.model_dump())
                     return result
