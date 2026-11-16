@@ -50,15 +50,27 @@ def main():
         parser.error("ANTHROPIC_API_KEY is not set")
 
     async def run(config):
+        # 말로 쓴 성공 기준은 행동 모델과 별도의 판정 모델이 확인한다 (agent/judge.py)
+        judge = None
+        if config.success_criteria:
+            from .judge import ClaudeJudge
+            try:
+                judge = ClaudeJudge()
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from None
         reports = []
-        for _ in range(args.repeat):
-            report = await execute_run(config, factory, args.output)
+        try:
+            for _ in range(args.repeat):
+                reports.append(await execute_run(config, factory, args.output, judge=judge))
+        finally:
+            if judge is not None:
+                await judge.close()
+        for report in reports:
             metadata = {"policy": args.policy, "model": args.model, "model_driven": model_driven}
             if args.policy == "claude":
                 metadata["escalation_model"] = escalation
             report.update(metadata)
             Path(report["output_dir"], "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-            reports.append(report)
         print(json.dumps({"policy": args.policy, "model_driven": model_driven,
             "runs": [{"output_dir": r["output_dir"], "metrics": r["metrics"]} for r in reports]}, ensure_ascii=False, indent=2))
         return all(s["status"] in {"success", "simulated_dropout"} for r in reports for s in r["sessions"])

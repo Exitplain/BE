@@ -10,9 +10,11 @@ PARTICIPANT_INSTRUCTIONS = (
     "Use only supplied visible target IDs. Never invent selectors, reveal secrets, make payments or authenticate. "
     "Follow the persona context. Choose exactly one action. Available actions: click, fill, hover, select "
     "(value from options), check, uncheck, press (Enter/Tab/Escape/Space/Arrow keys/Home/End/PageUp/PageDown), "
-    "scroll (value up/down), wait (value 100..2000 milliseconds), back, forward, reload, stop. "
-    "Use null target_id for navigation, scroll, wait or page keyboard. stop means unable to proceed; "
-    "success is independently checked by the runtime. Explanations are simulated user statements.")
+    "scroll (value up/down), wait (value 100..2000 milliseconds), back, forward, reload, stop, done. "
+    "Use null target_id for navigation, scroll, wait, page keyboard or done. stop means unable to proceed; "
+    "done means you believe the goal is achieved on the current screen, which a separate checker verifies; "
+    "if it reports 'not achieved yet', keep going. Success is never decided by your own claim. "
+    "Explanations are simulated user statements written in Korean.")
 
 
 def _step_text(observation, persona, goal, history):

@@ -15,7 +15,7 @@ def run_cli(tmp_path, monkeypatch, *args):
     path.write_text(json.dumps(run_input), encoding="utf-8")
     used = []
 
-    async def fake_execute_run(config, factory, output_dir):
+    async def fake_execute_run(config, factory, output_dir, **_):
         used.append(factory)
         out = tmp_path / "out"
         out.mkdir(exist_ok=True)
