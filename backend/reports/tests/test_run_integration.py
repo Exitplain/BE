@@ -75,7 +75,7 @@ class RunReportTests(WizardMixin, TestCase):
         self.assertRegex(timeline[0]["screenshot"], r"^/api/v1/observations/\d+/screenshot$")
         shot = self.client.get(timeline[0]["screenshot"])                  # A의 서빙 API로 열림
         self.assertEqual(shot.status_code, 200)
-        shot.close()                                                       # 파일을 닫아야 Windows에서 임시 폴더가 지워짐
+        b"".join(shot.streaming_content)                                                      # 파일을 닫아야 Windows에서 임시 폴더가 지워짐
         self.assertEqual([p["score"] for p in body["chart"]["points"]], [0.0, 20.0, 40.0])
         self.assertRegex(body["final_screenshot"], r"^/api/v1/sessions/\d+/final-screenshot$")
 
