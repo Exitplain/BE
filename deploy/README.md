@@ -69,6 +69,9 @@ chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
 | `GOOGLE_OAUTH_CLIENT_ID` | 구글 로그인 클라이언트 ID | FE와 같은 값. 구글은 https 도메인만 등록 가능 (IP·http 불가, localhost 예외) |
 | `EMAIL_HOST_USER` | 로그인 코드 메일을 보낼 Gmail 주소 | 비우면 메일을 보내지 않고 로그에만 찍는다 |
 | `EMAIL_HOST_PASSWORD` | 그 Gmail의 **앱 비밀번호**(16자리) | 구글 계정 비밀번호가 아님. 2단계 인증을 켜야 만들 수 있다 |
+| `TEST_ACCOUNT_KMS_KEY_ID` | 테스트 계정 비밀번호용 KMS 키 ARN (또는 `alias/exitplain-test-accounts`) | 비우면 Fernet(SECRET_KEY 기반). EC2 IAM 역할에 이 키의 `kms:GenerateDataKey`·`kms:Decrypt` 권한 필요. 넣은 뒤 `manage.py reencrypt_test_accounts` |
+| `TEST_ACCOUNT_KMS_REGION` | KMS 리전 | 기본 `ap-northeast-2` |
+| `TEST_ACCOUNT_RETENTION_DAYS` | 테스트 계정 보관 기간(일) | 기본 90. `manage.py purge_test_accounts`를 하루 한 번 실행 |
 
 ## 4. `settings.py` 반영 내용 (`a/deploy-settings` 브랜치, 문서 규칙상 PR로 머지)
 위 3절의 환경변수를 `settings.py`가 읽도록 이미 반영했다. 환경변수가 없으면 로컬 개발 기본값으로 동작한다.

@@ -11,6 +11,7 @@
 
 보안 (LLM 담당자 피드백 반영)
 - 감사 기록: 등록·수정·삭제·실행 사용·로그인 확인·자동 삭제를 TestAccountEvent에 남긴다. 비밀번호는 남기지 않는다.
+- 암호화: 서버에 TEST_ACCOUNT_KMS_KEY_ID가 있으면 AWS KMS 봉투 암호화, 없으면 Fernet (crypto.py 참고).
 - 보관 기간: 마지막으로 쓰이거나 바뀐 뒤 TEST_ACCOUNT_RETENTION_DAYS(기본 90일)가 지나면
   `manage.py purge_test_accounts`가 지운다 (서버에서 하루 한 번 실행).
 """
@@ -47,6 +48,14 @@ def _log(project, action, *, account=None, username="", actor=None, detail=""):
                                     account_id=account.pk if account else None,
                                     username=(account.username if account else username)[:200],
                                     detail=(detail or "")[:200])
+
+
+def _encrypt(password, project):
+    try:
+        return crypto.encrypt(password, project_id=project.pk)
+    except crypto.KeyUnavailable as exc:
+        raise ApiError(503, "TEST_ACCOUNT_KEY_UNAVAILABLE",
+                       "비밀번호를 암호화하지 못했습니다. 잠시 뒤 다시 저장해주세요.") from exc
 
 
 def account_count(project):
@@ -117,7 +126,7 @@ def replace_accounts(project, user, login_url, accounts):
     for position, (old, username, password) in enumerate(cleaned, start=1):
         if old is None:
             created = TestAccount.objects.create(project=project, position=position, username=username,
-                                                 password_encrypted=crypto.encrypt(password))
+                                                 password_encrypted=_encrypt(password, project))
             _log(project, TestAccountEvent.Action.ADDED, account=created, actor=user)
             continue
         changes = []
@@ -127,7 +136,7 @@ def replace_accounts(project, user, login_url, accounts):
             changes.append("비밀번호 변경")
         old.position, old.username = position, username
         if password:
-            old.password_encrypted = crypto.encrypt(password)
+            old.password_encrypted = _encrypt(password, project)
         if changes:                                   # 아이디·비밀번호가 바뀌면 다시 확인해야 한다
             old.status, old.status_message, old.checked_at = TestAccount.Status.UNCHECKED, "", None
         old.save()
@@ -179,6 +188,7 @@ def credentials_for_snapshot(snapshot, *, run_id=None):
     로그인 없이 테스트하는 계획이면 빈 목록. 확정 뒤 지워진 계정은 건너뛴다.
     부를 때마다 '실행에 사용' 감사 기록을 남기고 last_used_at을 갱신한다 (보관 기간이 다시 시작됨).
     파일·로그에 남기지 말고 에이전트 프로세스에만 넘길 것.
+    KMS를 부르지 못하면 crypto.KeyUnavailable, 풀 수 없는 값이면 crypto.DecryptError가 난다.
     """
     info = (snapshot.data or {}).get("test_accounts")
     if not info:
@@ -192,7 +202,7 @@ def credentials_for_snapshot(snapshot, *, run_id=None):
         if account is None:
             continue
         result.append({"account_id": str(account.id), "persona_code": pair["persona_code"], "username": account.username,
-                       "password": crypto.decrypt(account.password_encrypted), "login_url": info["login_url"]})
+                       "password": crypto.decrypt(account.password_encrypted, project_id=account.project_id), "login_url": info["login_url"]})
         TestAccount.objects.filter(pk=account.pk).update(last_used_at=now)   # updated_at은 건드리지 않는다
         _log(account.project, TestAccountEvent.Action.USED, account=account,
              detail=f"run {run_id}" if run_id else "")
