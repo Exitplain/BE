@@ -4,8 +4,10 @@ OBSERVE = """() => {
  const visible = e => { const r=e.getBoundingClientRect(); const s=getComputedStyle(e);
    return r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth && s.visibility!=='hidden' && s.display!=='none'; };
  document.querySelectorAll('[data-dropspot-id]').forEach(e=>e.removeAttribute('data-dropspot-id'));
- const els=Array.from(document.querySelectorAll('a,button,input,select,textarea,[role=button],[contenteditable=true]')).filter(visible);
  const rect=e=>{const r=e.getBoundingClientRect();const x=Math.max(0,r.left),y=Math.max(0,r.top);return {x,y,width:Math.max(0,Math.min(innerWidth,r.right)-x),height:Math.max(0,Math.min(innerHeight,r.bottom)-y)};};
+ // 모달·오버레이에 가려진 요소는 보이기만 하고 누를 수 없다. 화면에 보이는 부분의 가운데에서 맨 위에 있는 요소가 자신(또는 자신의 안/밖)일 때만 넣는다
+ const reachable = e => { const b=rect(e); const top=document.elementFromPoint(b.x+b.width/2, b.y+b.height/2); return !!top && (top===e || e.contains(top) || top.contains(e)); };
+ const els=Array.from(document.querySelectorAll('a,button,input,select,textarea,[role=button],[contenteditable=true]')).filter(e=>visible(e) && reachable(e));
  const elements=els.slice(0,80).map((e,i)=>{const id='e'+i;e.setAttribute('data-dropspot-id',id);
    return {id,box:rect(e),label:(e.labels?.[0]?.innerText||e.getAttribute('aria-label')||'').trim().slice(0,200),tag:e.tagName.toLowerCase(),text:(e.innerText||e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').slice(0,200),
     href:e.tagName==='A'?e.href:null, options:e.tagName==='SELECT'?Array.from(e.options).slice(0,30).map(o=>({value:o.value,label:o.label})):null, checked:!!e.checked, disabled:!!e.disabled, editable:e.isContentEditable, type:e.type||'',required:!!e.required,value:e.type==='password'?'[redacted]':(e.value||'').slice(0,100)};});
