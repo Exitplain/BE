@@ -29,7 +29,8 @@ class RunInput(StrictModel):
     # 성공 판정. 둘 중 하나 이상: 성공 화면 경로(정확히 일치) 또는 말로 쓴 성공 기준(별도 판정 모델이 화면을 보고 판단)
     success_path: str | None = None
     success_criteria: str | None = Field(default=None, min_length=1, max_length=500)
-    max_judgments_per_session: int = Field(default=3, ge=1, le=10)   # 성공 기준 판정 호출 상한 (비용)
+    # 성공 기준 판정 호출 상한 (비용). 새 화면에 들어설 때와 정책이 done 을 고를 때 판정한다
+    max_judgments_per_session: int = Field(default=5, ge=1, le=10)
     personas: list[Persona] = Field(min_length=1, max_length=20)
     max_steps: int = Field(default=20, ge=1, le=100)
     timeout_seconds: float = Field(default=120, gt=0, le=600)
