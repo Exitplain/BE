@@ -183,7 +183,13 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 state.update(status="agent_failure", reason="Policy stopped without verified completion")
                                 return
                             acted = time.monotonic()
-                            await act(page, action, obs)
+                            try:
+                                await act(page, action, obs)
+                            except Exception as exc:
+                                # 어떤 행동이 왜 실패했는지 남긴다 (예외 문구는 화면·입력값이 섞일 수 있어 종류만)
+                                await emit("action.failed", sid, {"step_id": step_id, "action": action.model_dump(),
+                                                                  "error": type(exc).__name__})
+                                raise
                             history.append(action.model_dump())
                             last_action = action.kind
                             await emit("action.completed", sid, {"step_id": step_id, "action": action.model_dump()})
