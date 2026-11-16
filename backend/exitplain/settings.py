@@ -249,6 +249,7 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
+# claude 는 ANTHROPIC_API_KEY 가 필요하다. AGENT_MODEL 을 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5 (agent/policies.py ClaudePolicy)
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
 
 # 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
