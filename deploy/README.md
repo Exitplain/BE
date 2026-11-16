@@ -57,7 +57,8 @@ chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
 | `EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT` | 프로젝트당 동시 실행 수 | 기본 1 |
 | `ALLOWED_TARGET_ORIGINS` | 테스트 대상 허용 출처 | SSRF 방어 |
 | `AGENT_PYTHON` | 에이전트 실행 파이썬 | `/srv/exitplain/venv/bin/python` |
-| `AGENT_POLICY` | shop_scripted / scripted / openai | 데모 쇼핑몰은 shop_scripted (API 키 불필요). openai는 AGENT_MODEL·OPENAI_API_KEY 필요 |
+| `AGENT_POLICY` | shop_scripted / scripted / openai / claude | 데모 쇼핑몰은 shop_scripted (API 키 불필요). openai는 AGENT_MODEL·OPENAI_API_KEY 필요. claude는 ANTHROPIC_API_KEY 필요 (AGENT_MODEL 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5) |
+| `ANTHROPIC_API_KEY` | Claude API 키 | `AGENT_POLICY=claude`일 때만. 워커가 에이전트 프로세스에 그대로 물려준다. 커밋 금지 |
 | `AGENT_MODEL` | LLM 모델명 | LLM 정책일 때만 |
 | `DJANGO_SECRET_KEY` | 시크릿 키 | `DEBUG=False`인데 없으면 서버가 시작되지 않는다 |
 | `DJANGO_DEBUG` | 서버에서는 `False` | 없으면 `True`(로컬 개발 기본값) |

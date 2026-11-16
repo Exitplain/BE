@@ -5,7 +5,7 @@ import sys
 import pytest
 
 from agent import cli
-from agent.policies import OpenAIPolicy, ScriptedPolicy, ShopScriptedPolicy
+from agent.policies import ClaudePolicy, OpenAIPolicy, ScriptedPolicy, ShopScriptedPolicy
 
 
 def run_cli(tmp_path, monkeypatch, *args):
@@ -45,3 +45,24 @@ def test_openai_policy_is_really_used(tmp_path, monkeypatch):
     policy = used[0]()
     assert isinstance(policy, OpenAIPolicy) and policy.model == "test-model"
     assert (summary["policy"], summary["model"], summary["model_driven"]) == ("openai", "test-model", True)
+
+
+def test_claude_policy_defaults_to_haiku_with_sonnet_escalation(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-not-a-real-key")
+    used, summary = run_cli(tmp_path, monkeypatch, "--policy", "claude")
+    policy = used[0]()
+    assert isinstance(policy, ClaudePolicy)
+    assert (policy.model, policy.escalation_model) == ("claude-haiku-4-5", "claude-sonnet-5")
+    assert (summary["policy"], summary["model"], summary["escalation_model"], summary["model_driven"]) == \
+        ("claude", "claude-haiku-4-5", "claude-sonnet-5", True)
+
+
+def test_claude_policy_requires_credentials_before_launching(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    launched = []
+    monkeypatch.setattr(cli, "execute_run", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(sys, "argv", ["agent.cli", "--demo", "normal", "--policy", "claude", "--output", str(tmp_path)])
+    with pytest.raises(SystemExit) as stop:
+        cli.main()
+    assert stop.value.code == 2 and launched == []

@@ -1,5 +1,7 @@
 annotated-types==0.8.0
+anthropic==2.8.0
 anyio==4.16.0
+docstring-parser==0.18.0
 greenlet==3.5.6
 h11==0.16.0
 httpcore2==2.16.0
@@ -8,6 +10,7 @@ idna==3.20
 iniconfig==2.3.1
 jiter==0.18.0
 openai==3.42.1
+opentelemetry-api==1.45.2
 packaging==26.3
 playwright==1.64.1
 pluggy==1.7.0
