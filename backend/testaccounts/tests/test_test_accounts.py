@@ -118,9 +118,9 @@ class TestAccountTests(WizardMixin, TestCase):
                                format="json")
         self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "SEGMENT_TOTAL"))
 
-    def test_no_login_mode_keeps_20_personas_and_no_accounts_in_snapshot(self, _):
+    def test_no_login_mode_uses_default_personas_and_no_accounts_in_snapshot(self, _):
         self.put(accounts(5))
         snap = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
-        self.assertEqual(len(snap.data["personas"]), 20)
+        self.assertEqual(len(snap.data["personas"]), 10)                   # 로그인 없이 테스트하면 기본 10명
         self.assertNotIn("test_accounts", snap.data)
         self.assertEqual(credentials_for_snapshot(snap), [])

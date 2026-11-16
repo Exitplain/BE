@@ -11,6 +11,8 @@ from plans.run_input import RunInputError, build_run_input, build_run_inputs
 
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class RunInputTests(WizardMixin, TestCase):
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 페르소나 20명·시드 3회 기준으로 쓴 테스트
+
     def snapshot(self):
         return PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
 

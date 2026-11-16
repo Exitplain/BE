@@ -357,6 +357,7 @@ class ScreenshotTests(ApiBase):
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class EndToEndTests(WizardMixin, TestCase):
     """HTTP 로 실행을 시작하고, 워커가 가짜 에이전트를 돌린 뒤, 조회·스크린샷까지 이어서 확인한다."""
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 페르소나 20명·시드 3회 기준으로 쓴 테스트
 
     def test_start_run_work_poll_and_view_screenshots(self, _):
         tmp = tempfile.TemporaryDirectory()

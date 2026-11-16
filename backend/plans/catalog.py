@@ -12,18 +12,22 @@ TEXT_LIMIT = 500           # 타겟 설명·추가 메모 (API_SPEC 4.2와 같�
 CUSTOM_TASK_LIMIT = 5
 CUSTOM_TASK_TEXT_LIMIT = 100
 
-# Figma P05b: 세그먼트 4개 × 5명 = 20명
+# 세그먼트 4개. 페르소나는 기본 10명(3·3·2·2), 사용자가 4~20명 사이로 조절할 수 있다.
+# (Figma P05b는 4개 × 5명 = 20명이었으나, 실행 비용 때문에 팀 결정으로 기본 10명으로 낮춤)
 SEGMENT_IDS = ["segment_1", "segment_2", "segment_3", "segment_4"]
-PERSONA_TOTAL = 20
-DEFAULT_SEGMENTS = [{"id": s, "count": 5} for s in SEGMENT_IDS]
+PERSONA_DEFAULT = 10
+PERSONA_MIN = len(SEGMENT_IDS)       # 세그먼트마다 1명 이상
+PERSONA_MAX = 20                     # agent.schemas.RunInput.personas 상한과 같다
+DEFAULT_SEGMENTS = [{"id": s, "count": c} for s, c in zip(SEGMENT_IDS, (3, 3, 2, 2))]
 
 # 실행 조건. Figma P05b: 모바일 390 · 동시 5세션 · 요청 간격 1초 · 시드 3회 · 스텝 40 · 5분 · 비용 상한(값 확인 필요)
+# 시드는 실행 비용 때문에 팀 결정으로 기본 1회 (사용자가 1~3회 선택)
 # 범위는 agent.schemas.RunInput 상한과 같게 둔다 (동시 실행 1~5, 요청 간격 0~5초).
 DEFAULT_LIMITS = {
     "viewport_width": 390,
     "concurrency": 5,
     "request_interval_seconds": 1.0,
-    "seed_count": 3,
+    "seed_count": 1,
     "max_steps": 40,
     "timeout_seconds": 300,
     "cost_cap": None,
@@ -50,7 +54,9 @@ def capabilities():
     return {
         "ages": AGE_OPTIONS,
         "segment_ids": SEGMENT_IDS,
-        "persona_total": PERSONA_TOTAL,
+        "persona_total": PERSONA_DEFAULT,
+        "persona_min": PERSONA_MIN,
+        "persona_max": PERSONA_MAX,
         "limits": {k: {"min": lo, "max": hi} for k, (lo, hi, _) in LIMIT_RANGES.items()},
         "custom_task_limit": CUSTOM_TASK_LIMIT,
     }

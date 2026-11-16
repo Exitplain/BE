@@ -17,7 +17,10 @@ class PlanCreateTests(WizardMixin, TestCase):
         plan = self.create_plan()
         self.assertEqual(plan["revision"], 1)
         self.assertEqual(plan["task_ids"], list(DEFAULT_TASK_IDS))
-        self.assertEqual([s["count"] for s in plan["segments"]], [5, 5, 5, 5])
+        self.assertEqual([s["count"] for s in plan["segments"]], [3, 3, 2, 2])   # 기본 10명 (비용 때문에 20명에서 줄임)
+        self.assertEqual(plan["limits"]["seed_count"], 1)                         # 기본 시드 1회 (1~3회 선택)
+        caps = plan["options"]["capabilities"]
+        self.assertEqual((caps["persona_total"], caps["persona_min"], caps["persona_max"]), (10, 4, 20))
         self.assertEqual(plan["limits"]["concurrency"], 5)   # Figma 동시 5세션
         funnel = plan["task_funnels"][0]
         self.assertTrue(funnel["auto"])                                   # Figma P05c: 사이트 분석으로 자동 결정
@@ -82,12 +85,15 @@ class PlanStep3Tests(WizardMixin, TestCase):
                                HTTP_IF_MATCH=f'"{plan["revision"]}"')
         self.assertEqual(res.status_code, 404)                            # '다시 추정' 없음
 
-    def test_segment_total(self, _):  # Figma P05e
+    def test_segment_total(self, _):  # Figma P05e. 로그인 없이 테스트하면 4~20명 사이에서 고른다
         plan = self.ready_plan()
-        segs = [{"id": f"segment_{i}", "count": c} for i, c in enumerate([5, 5, 5, 4], 1)]
+        segs = [{"id": f"segment_{i}", "count": c} for i, c in enumerate([6, 5, 5, 5], 1)]
         res = self.patch(plan, {"segments": segs})
-        self.assertEqual(res.json()["error"]["message"], "합계가 20명이 되도록 맞춰주세요 · 지금 19명")
-        segs[3]["count"], segs[0]["count"] = 4, 6
+        self.assertEqual(res.json()["error"]["message"], "합계를 4~20명 사이로 맞춰주세요 · 지금 21명")
+        segs[0]["count"] = 5                                                 # 20명
+        plan = self.patch(plan, {"segments": segs}).json()
+        self.assertEqual(plan["review"]["personas"]["total"], 20)
+        segs = [{"id": f"segment_{i}", "count": 1} for i in range(1, 5)]   # 4명
         self.assertEqual(self.patch(plan, {"segments": segs}).status_code, 200)
 
     def test_limits_and_frustration(self, _):
@@ -112,27 +118,27 @@ class ConfirmationTests(WizardMixin, TestCase):
     def test_review_summary(self, _):
         review = self.ready_plan()["review"]
         self.assertEqual(review["blocking"], [])
-        self.assertEqual(review["total_sessions"], 20 * 2 * 3)
+        self.assertEqual(review["total_sessions"], 10 * 2 * 1)          # 페르소나 10 × 과업 2 × 시드 1
 
     def test_confirm_creates_immutable_snapshot(self, _):
         snap = self.confirm()
         data = snap["data"]
         self.assertEqual(snap["plan_revision"], 2)
         self.assertEqual(snap["persona_generator"], "rules-v1")
-        self.assertEqual(len(data["personas"]), 20)
-        self.assertEqual([s["representative"] for s in data["segments"]], ["P-001", "P-006", "P-011", "P-016"])
+        self.assertEqual(len(data["personas"]), 10)
+        self.assertEqual([s["representative"] for s in data["segments"]], ["P-001", "P-004", "P-007", "P-009"])
         self.assertEqual(data["tasks"][0]["funnel"][0]["id"], "stage_landing")
-        self.assertEqual(data["total_sessions"], 120)
-        self.assertEqual(PersonaSnapshot.objects.count(), 20)
+        self.assertEqual(data["total_sessions"], 20)
+        self.assertEqual(PersonaSnapshot.objects.count(), 10)
 
         # 같은 revision 재확정은 409, 계획을 고친 뒤 확정하면 새 스냅샷
         res = self.client.post(f"/api/v1/plans/{snap['plan_id']}/confirmations", {"revision": 2}, format="json")
         self.assertEqual(res.json()["error"]["code"], "ALREADY_CONFIRMED")
         plan = self.client.get(f"/api/v1/plans/{snap['plan_id']}").json()
-        plan = self.patch(plan, {"limits": {"seed_count": 1}}).json()
+        plan = self.patch(plan, {"limits": {"seed_count": 3}}).json()
         snap2 = self.confirm(plan)
         self.assertNotEqual(snap2["plan_revision_id"], snap["plan_revision_id"])
-        self.assertEqual(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["limits"]["seed_count"], 3)
+        self.assertEqual(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["limits"]["seed_count"], 1)
 
     def test_confirm_after_discovery_expired(self, _):
         plan = self.ready_plan()

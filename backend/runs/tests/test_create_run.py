@@ -60,6 +60,7 @@ class NetguardTests(TestCase):
 
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class CreateRunTests(WizardMixin, TestCase):
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 페르소나 20명·시드 3회 기준으로 쓴 테스트
     def setUp(self):
         super().setUp()
         patcher = patch("runs.netguard.resolve_host", return_value=[])  # shop.local 은 DNS 로 풀지 않는다
