@@ -100,6 +100,25 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         state["artifact"] = str(path)
                         return str(path)
 
+                    judged_screens = set()
+
+                    async def judge_screen(obs, step_id, trigger):
+                        """지금 화면을 성공 기준으로 판정한다. 판정 수 한도를 넘으면 None (판정 안 함)."""
+                        if state["judgments"] >= config.max_judgments_per_session:
+                            return None
+                        state["judgments"] += 1
+                        verdict, used = await judge.judge(config.success_criteria, config.goal, obs)
+                        for model_id, u in used.items():
+                            total = state["by_model"].setdefault(model_id, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+                            for key in total:
+                                total[key] += u.get(key, 0)
+                            state["calls"] += u.get("calls", 0)
+                            state["input"] += u.get("input_tokens", 0)
+                            state["output"] += u.get("output_tokens", 0)
+                        await emit("success.judged", sid, {"step_id": step_id, "achieved": verdict.achieved, "trigger": trigger,
+                                                           "reason": verdict.reason, "model": getattr(judge, "model", None)})
+                        return verdict
+
                     async def body():
                         nonlocal policy, last_action, stage, wait_seconds
                         await emit("session.started", sid, {"persona": persona.model_dump()})
@@ -136,6 +155,17 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             if config.success_path and urlsplit(page.url).path == config.success_path:
                                 state.update(status="success", reason="Configured success path observed")
                                 return
+                            # 새 화면에 들어서면 정책의 done 을 기다리지 않고 판정한다 (목표 화면에 와서도 계속 진행하는 경우).
+                            # 시작 화면은 건너뛴다. 판정 수는 max_judgments_per_session 안에서만.
+                            screen = urlsplit(page.url).path
+                            if not step:
+                                judged_screens.add(screen)          # 시작 화면
+                            elif config.success_criteria and screen not in judged_screens:
+                                judged_screens.add(screen)
+                                verdict = await judge_screen(obs, step_id, "new_screen")
+                                if verdict is not None and verdict.achieved:
+                                    state.update(status="success", reason="Success criteria judged achieved on screen")
+                                    return
                             for category in point["signals"]:
                                 if category in seen_signals:
                                     continue          # 같은 원인은 처음 한 번만 issue로 남김
@@ -174,24 +204,15 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 # 정책의 '다 했다'는 주장은 성공이 아니다. 성공 기준이 있으면 별도 판정 모델이 지금 화면으로 확인한다.
                                 if not config.success_criteria:
                                     note = "not verified: success is checked by the configured success path only"
-                                elif state["judgments"] >= config.max_judgments_per_session:
-                                    note = "not verified: judgment limit reached for this session"
                                 else:
-                                    state["judgments"] += 1
-                                    verdict, used = await judge.judge(config.success_criteria, config.goal, obs)
-                                    for model_id, u in used.items():
-                                        total = state["by_model"].setdefault(model_id, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
-                                        for key in total:
-                                            total[key] += u.get(key, 0)
-                                        state["calls"] += u.get("calls", 0)
-                                        state["input"] += u.get("input_tokens", 0)
-                                        state["output"] += u.get("output_tokens", 0)
-                                    await emit("success.judged", sid, {"step_id": step_id, "achieved": verdict.achieved,
-                                                                       "reason": verdict.reason, "model": getattr(judge, "model", None)})
-                                    if verdict.achieved:
+                                    verdict = await judge_screen(obs, step_id, "done")
+                                    if verdict is None:
+                                        note = "not verified: judgment limit reached for this session"
+                                    elif verdict.achieved:
                                         state.update(status="success", reason="Success criteria judged achieved on screen")
                                         return
-                                    note = f"not achieved yet: {verdict.reason}"
+                                    else:
+                                        note = f"not achieved yet: {verdict.reason}"
                                 history.append({**action.model_dump(), "result": note})
                                 last_action = "done"
                                 continue

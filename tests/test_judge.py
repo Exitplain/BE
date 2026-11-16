@@ -46,10 +46,23 @@ async def test_judge_decides_success_from_the_screen(tmp_path):
         report = await execute_run(config(base), DoneOnSuccessPage, tmp_path, events.append, judge=judge)
     session = report["sessions"][0]
     assert (session["status"], session["reason"]) == ("success", "Success criteria judged achieved on screen")
-    assert session["judgments"] == 1 and len(judge.calls) == 1
-    assert session["usage_by_model"]["fake-judge"] == {"calls": 1, "input_tokens": 100, "output_tokens": 10}
+    assert session["judgments"] == len(judge.calls) >= 1 and "/success" in judge.calls[-1]
+    assert session["usage_by_model"]["fake-judge"]["calls"] == session["judgments"]
     judged = [e["payload"] for e in events if e["type"] == "success.judged"]
-    assert judged[0]["achieved"] is True and judged[0]["reason"]
+    assert judged[-1]["achieved"] is True and judged[-1]["reason"] and judged[-1]["trigger"] in {"new_screen", "done"}
+
+
+async def test_reaching_the_goal_screen_is_enough_without_done(tmp_path):
+    """정책이 목표 화면에 와서도 done 을 고르지 않고 계속 진행해도, 새 화면 판정으로 성공을 잡는다."""
+    judge, events = FakeJudge(), []
+    with demo_server() as base:
+        report = await execute_run(config(base), ScriptedPolicy, tmp_path, events.append, judge=judge)
+    session = report["sessions"][0]
+    assert (session["status"], session["reason"]) == ("success", "Success criteria judged achieved on screen")
+    triggers = [e["payload"]["trigger"] for e in events if e["type"] == "success.judged"]
+    assert triggers and set(triggers) == {"new_screen"}
+    first_url = next(e["payload"]["url"] for e in events if e["type"] == "observation.created")
+    assert first_url not in judge.calls                                   # 시작 화면은 판정하지 않는다
 
 
 async def test_premature_done_is_rejected_and_fed_back(tmp_path):
@@ -66,7 +79,7 @@ async def test_premature_done_is_rejected_and_fed_back(tmp_path):
     with demo_server() as base:
         report = await execute_run(config(base), EagerPolicy, tmp_path, judge=judge)
     session = report["sessions"][0]
-    assert session["status"] == "success" and session["judgments"] == 2
+    assert session["status"] == "success" and session["judgments"] >= 2
     assert any(r and r[0] and r[0].startswith("not achieved yet: 아직 주문 화면") for r in seen)
 
 
