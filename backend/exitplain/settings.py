@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders',
     'common',
     'projects',  
     'discoveries',
@@ -68,10 +69,12 @@ INSTALLED_APPS = [
     'reports',
     'accounts',
     'runs',
+    'testaccounts',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CommonMiddleware 보다 앞에 둔다
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -159,11 +162,29 @@ STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', BASE_DIR / 'staticfiles')
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# EMAIL_HOST_USER가 있으면 실제로 메일을 보낸다(기본 Gmail SMTP). 없으면 메일 내용을 콘솔(로그)에만 찍는다 (로컬 개발용)
+# Gmail: 2단계 인증을 켠 계정의 '앱 비밀번호'(16자리)를 EMAIL_HOST_PASSWORD에 넣는다. 구글 계정 비밀번호가 아님
+_smtp_user = os.environ.get('EMAIL_HOST_USER', '')   # 소문자 변수: Django 6.1은 MAILERS와 옛 EMAIL_* 설정을 같이 못 씀
+if _smtp_user:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.smtp.EmailBackend',
+            'OPTIONS': {
+                'host': os.environ.get('EMAIL_HOST', 'smtp.gmail.com'),
+                'port': int(os.environ.get('EMAIL_PORT', 587)),
+                'username': _smtp_user,
+                'password': os.environ.get('EMAIL_HOST_PASSWORD', ''),
+                'use_tls': True,
+                'timeout': 10,
+            },
+        },
+    }
+else:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        },
+    }
 
 # --- 백엔드 B: 새 테스트 위저드 설정 ---
 # TestPlan·Discovery가 참조할 프로젝트 모델. 백엔드 A의 모델 경로로 바꾼다.
@@ -187,7 +208,9 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 EXITPLAIN_LOGIN_CODE_TTL_SECONDS = 600
 EXITPLAIN_LOGIN_CODE_RESEND_SECONDS = 60
 EXITPLAIN_LOGIN_CODE_MAX_ATTEMPTS = 5
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Exitplain <no-reply@exitplain.local>')
+# 보내는 사람. Gmail은 로그인한 계정 주소로만 보낼 수 있어서 EMAIL_HOST_USER(환경변수)가 있으면 그 주소를 쓴다
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL') or (
+    f'Exitplain <{_smtp_user}>' if _smtp_user else 'Exitplain <no-reply@exitplain.local>')
 # Google 로그인: Google Cloud Console에서 발급한 OAuth 클라이언트 ID (프론트와 같은 값)
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
 
@@ -200,6 +223,9 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
+
+# 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
+TEST_ACCOUNT_KEY = os.environ.get('TEST_ACCOUNT_KEY', '')
 AGENT_MODEL = os.environ.get('AGENT_MODEL', '')
 # 테스트 대상으로 허용할 사설·내부 주소(origin). 콤마로 구분. 비어 있으면 사설 IP 대상은 막는다 (SSRF 방어)
 ALLOWED_TARGET_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_TARGET_ORIGINS', '').split(',') if o.strip()]
@@ -213,3 +239,24 @@ EXITPLAIN_FINALIZE_HOOK = os.environ.get('EXITPLAIN_FINALIZE_HOOK') or 'reports.
 SAMPLE_PROJECT_URL = os.environ.get('SAMPLE_PROJECT_URL', 'https://banchanroad.example/')
 # 샘플 프로젝트의 소유자(로그인 불가 시스템 계정)
 SAMPLE_OWNER_EMAIL = os.environ.get('SAMPLE_OWNER_EMAIL', 'sample@exitplain.invalid')
+
+# --- 프런트를 다른 주소에서 띄울 때(CORS) ---
+# 같은 주소로 서비스하면(Nginx 프록시, Vercel rewrites) 아래 값은 필요 없다. 비워 두면 다른 출처 요청은 모두 막힌다.
+# 예) CORS_ALLOWED_ORIGINS=http://localhost:5173,https://exitplain.vercel.app  (콤마로 구분, 끝에 / 없이)
+#     같은 주소들을 CSRF_TRUSTED_ORIGINS 에도 넣어야 POST·PATCH 가 통과한다.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS')
+CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)  # 로그인 쿠키를 주고받기 위해 (허용 출처가 있을 때만)
+CORS_URLS_REGEX = r'^/api/.*$'                       # API 만. /admin/ 등은 대상이 아니다
+CORS_ALLOW_HEADERS = (*default_headers, 'idempotency-key', 'if-match')  # 실행 생성, 계획 수정에 쓰는 요청 헤더
+CORS_EXPOSE_HEADERS = ['ETag', 'Idempotent-Replayed', 'Content-Disposition']  # 프런트가 읽어야 하는 응답 헤더
+
+# 프런트가 다른 '사이트'(예: localhost, vercel.app)에서 직접 API 를 부를 때만 켠다.
+# 쿠키를 다른 사이트로도 보내려면 SameSite=None; Secure 여야 하므로 DJANGO_HTTPS 도 함께 켜져 있어야 한다.
+# Safari 등은 다른 사이트 쿠키를 막으니, 가능하면 Vercel rewrites 나 같은 사이트(app.exitplain.store)를 쓴다.
+if _env_bool('DJANGO_CROSS_SITE_COOKIES'):
+    SESSION_COOKIE_SAMESITE = 'None'
+    CSRF_COOKIE_SAMESITE = 'None'
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
