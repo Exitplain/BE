@@ -2,6 +2,7 @@
 
 - 연계: [기능명세서](../기능명세서.md), [API 계약](API_및_데이터_계약.md), [개발 백로그](개발_백로그.md)
 - 상태: **설계 제안**. Django 모델/마이그레이션·Redis·운영 캐시·토큰 최적화가 구현됐다는 뜻이 아니다.
+- 확장 제안: 3.1절은 `ai_extra/`의 자동화 영역(퍼널·원인 후보·페르소나 생성·미디어 관측·orchestrator/critic)에 필요한 엔터티 **제안**이다. 현재 `backend/`에는 Django 앱·모델이 없고 DB는 sqlite 기본값이며, RDS 엔진은 미결정이다. 이 절도 모델·마이그레이션이 구현됐다는 뜻이 아니다.
 - 원칙: URL-only와 source-connected가 같은 프로젝트/계획/실행/리포트 구조를 사용한다. 코드는 선택 관계다. 이미지·코드 원문·영상은 DB의 큰 JSON에 넣지 않는다.
 
 ## 1. 핵심 실행 ERD
@@ -41,12 +42,12 @@ erDiagram
 | Discovery | project, environment_revision nullable, source_snapshot nullable, state, limits, started/finished | 코드만 읽을 때 환경이 없을 수 있음. GUI 실행 가능과 분리 |
 | FeatureCandidate | discovery, stable_key, label, source_kind, confidence, confirmation | 별도 근거 참조. source_kind=`screen/code/user`, confirmation/추정 신뢰도는 다른 필드 |
 | PlanRevision | project, plan_key, revision, discovery, audience_json, state, confirmed_by/at, policy_versions | confirm 뒤 불변. 변경은 새 revision. 기능 선택/성공 조건/한도 snapshot |
-| PlanTask | plan_revision, task_key, goal, success_rule, initial_state, action_policy, readiness | `(plan_revision_id,task_key)` unique. 다대다 기능 연결은 PlanTaskFeature로 분리 |
+| PlanTask | plan_revision, task_key, goal, success_rule, initial_state, action_policy, readiness | `(plan_revision_id,task_key)` unique. 다대다 기능 연결은 PlanTaskFeature로 분리. `success_rule`은 `type`(url_path 등, 이후 media_event·dom_state 확장 후보)과 schema_version을 가진다. `requires_transcript` 선언 위치는 미결정 |
 | PersonaSnapshot | plan_revision, profile_key, version, device, weights, context | 실행별 재현 가능한 문맥. 연령만으로 weights 변경 금지 |
 | Run | workspace, project, plan_revision, environment_revision, state, idempotency_key, created_by, source_snapshot nullable | 계획/환경/코드 버전 고정. 요청 body hash와 idempotency를 함께 검사 |
 | Attempt | run, number, state, heartbeat_at, worker_ref, cancellation_requested_at | `(run_id,number)` unique. 과거 실패/근거 보존 |
 | Session | attempt, plan_task, persona_snapshot, state, last_observation, step_count, terminal_reason | task/profile은 해당 Run의 계획 소속이어야 함. terminal state와 기술 실패 원인 분리 |
-| Observation | session, step, stage, observed_at, screenshot_artifact, viewport, signal_json, action_json | `(session_id,step)` unique. 입력 개인정보/토큰 제거. 대형 DOM/영상은 별도 artifact |
+| Observation | session, step, stage, modality, observed_at, screenshot_artifact, viewport, signal_json, action_json | `(session_id,step)` unique. 입력 개인정보/토큰 제거. 대형 DOM/영상은 별도 artifact. `modality`=text/image/audio/video/unsupported (3.1절, 현재 관측 구현에는 이 값이 없음). `stage`는 FunnelStage.stage_key를 가리키는 문자열 |
 | RunEvent | attempt, session nullable, event_id, producer_id, producer_sequence, ingest_sequence, type, occurred/received_at, payload | event_id unique. attempt 수집 순서는 서버 직렬 부여. 큰 이미지/trace 원문 없음 |
 | AccountLease | workspace, environment_revision, session nullable, secret_ref, provider_ref, purpose, expires_at, state | 비밀값 대신 참조. 계정별 쓰기 락·임대 유효성. 브라우저 context 격리와 별개 |
 | ControlLease | session, holder_user, expires_at, state, version | 활성 제어권 최대 1개. 만료/연결 종료 시 복구 |
@@ -102,7 +103,7 @@ erDiagram
 |---|---|---|
 | Artifact | workspace, owner_kind/참조 FK, kind, object_key, sha256, bytes, dimensions, masking_revision, state, expires_at | 원문 아닌 객체 저장소 참조. owner는 run/build/source 중 명시 관계와 check constraint로 제한. DB 조회만으로 모든 파일 접근을 허용하지 않음 |
 | EvidenceLink | occurrence, observation, artifact, region_json, evidence_kind | 같은 근거가 여러 이슈를 뒷받침 가능. screenshot/bbox/설명 출처 대응 |
-| Issue / IssueOccurrence | project, issue_key, reviewed_state / session, task, stage, category, detector_version, confidence | 실행 간 동일성은 대응 가설. unique task/stage 문자열만으로 영구 동일 이슈 확정 금지 |
+| Issue / IssueOccurrence | project, issue_key, reviewed_state / session, task, stage, category, detector_version, confidence | 실행 간 동일성은 대응 가설. unique task/stage 문자열만으로 영구 동일 이슈 확정 금지. `category` 자유 문자열은 3.1절의 CauseCategory 외래키로 대체하는 방향(제안) |
 | ReportSnapshot | run, revision, status, sealed_at, schema_version, content_hash, counts, data_ref | `(run,revision)` unique. partial/final·분모·근거 상태 고정. 수정 시 새 revision |
 | ExportJob | report_snapshot, format, locale, renderer_version, state, artifact, failure_code | 동일 입력 생성 중 중복 방지. 파일 만료/권한과 캐시 적중은 별도 |
 | UsageEntry | run, attempt, session nullable, purpose, provider, request_id, token categories, browser_seconds, cost_status | 호출/재시도별 원장. 추정/확정/공급자 확인 필요 구분 |
@@ -111,6 +112,52 @@ erDiagram
 | HumanObservation | project, anonymous_participant, task_revision, condition_revision, outcome, stage/cause, dataset_split | 참여자×과업 중복·보정용/평가용 분리. 실제 사람 관측만 입력 |
 | AuditLog | workspace, actor, action, resource_ref, request_id, occurred_at | 권한/실행/삭제/비밀값 접근/재처리 기록. 비밀값/코드 원문 제외 |
 
+## 3.1 자동화 확장 ERD (제안)
+
+현재 하드코딩된 단계·원인·프로필을 탐색·생성 결과로 바꾸는 영역([ai_extra](../ai_extra/README.md))의 저장 구조다. 근거가 되는 현재 코드의 고정 위치는 각 영역의 SPEC에 있다. 이 절의 엔터티는 구현되지 않았다.
+
+```mermaid
+erDiagram
+    DISCOVERY ||--o{ EXPLORE_NODE : maps
+    DISCOVERY ||--o{ EXPLORE_EDGE : links
+    EXPLORE_NODE ||--o{ EXPLORE_EDGE : connects
+    SOURCE_SNAPSHOT ||--o{ FRAMEWORK_DETECTION : detects
+    PROJECT ||--o{ FUNNEL_REVISION : versions
+    DISCOVERY ||--o{ FUNNEL_REVISION : proposes
+    FUNNEL_REVISION ||--o{ FUNNEL_STAGE : orders
+    FUNNEL_STAGE ||--o{ FUNNEL_STAGE_NODE : projects
+    EXPLORE_NODE ||--o{ FUNNEL_STAGE_NODE : belongs
+    OBSERVATION ||--o{ MEDIA_OBSERVATION : captures
+    MEDIA_OBSERVATION ||--o| TRANSCRIPT_RECORD : transcribes
+    CAUSE_TAXONOMY_REVISION ||--o{ CAUSE_CATEGORY : defines
+    ISSUE_OCCURRENCE ||--o{ CAUSE_CANDIDATE : hypothesizes
+    CAUSE_CATEGORY ||--o{ CAUSE_CANDIDATE : classifies
+    PLAN_REVISION ||--o{ PERSONA_GENERATION_REVISION : generates
+    PERSONA_GENERATION_REVISION ||--o{ VARIABLE_RANGE_SUGGESTION : suggests
+    PROJECT ||--o{ ORCHESTRATION_STEP : tracks
+    PROJECT ||--o{ CRITIC_FINDING : reviews
+```
+
+| 엔터티 | 주요 필드/관계 | 제약·역할 |
+|---|---|---|
+| FunnelRevision | project, task_key, revision, discovery, mode(local/url), verification(verified/unverified/blocked), source(discovered/edited), state(draft/approved), approved_by/at | `(project,task_key,revision)` unique. 승인 뒤 불변, 변경은 새 revision. url 결과는 사용자 승인 전 approved 금지 |
+| FunnelStage | funnel_revision, stage_key, name, order, confidence | `(funnel_revision,stage_key)` unique. **stage_key는 revision 간 유지**(이름·순서 변경에도 불변), R05 단계 매핑·실측 퍼널과 정렬. 단계 수는 고정값이 아님 |
+| FunnelStageNode | funnel_stage, explore_node | 단계가 어떤 탐색 노드를 묶는지. 다대다 |
+| ExploreNode | discovery, signature, url_template, modality, depth, status(confirmed/frontier/needs_gui_check/blocked) | `(discovery,signature)` unique. frontier·needs_gui_check는 완료로 집계하지 않음. 미탐색과 없음을 구분 |
+| ExploreEdge | discovery, from_node, to_node, action_kind, source(code/screen) | 코드 추출 간선과 화면 확인 간선을 구분. 불일치는 상태로 보존하고 덮어쓰지 않음 |
+| (근거 연결) | explore_node/explore_edge ↔ CodeHint, Observation | 파일:줄·화면 근거 참조. 코드 본문 최소 보존 |
+| FrameworkDetection | source_snapshot, framework, router, version, confidence, evidence_ref | 감지가 모호하거나 미지원이면 값을 추측해 채우지 않고 blocked 상태 |
+| MediaObservation | observation, element_ref, kind, event_summary, muted, volume, duration, rms_dbfs, peak_dbfs, silent_ratio, dominant_hz, audible_state, analysis_tier(T0/T1/T2), src_hash | 재생 이벤트와 실제 신호·들릴 수 있음을 분리 기록. 원본 음원·영상은 DB에 두지 않음. 토큰이 섞일 수 있는 원본 URL 대신 해시 |
+| TranscriptRecord | media_observation, language, engine, text_artifact, usage_ref, expires_at | T2는 `requires_transcript` 과업에서 명시 실행했을 때만 생성. 본문은 Artifact, 만료 있음. 전사는 페르소나 입력에 쓰지 않음, unverified |
+| CauseTaxonomyRevision / CauseCategory | revision, state / taxonomy_revision, key, label | 원인 분류의 단일 정의. 현재 리포트 3종·Human Alignment 9종·"7종"의 불일치를 한 곳으로 모음. 확정 목록은 미정 |
+| CauseCandidate | issue_occurrence, category, taxonomy_revision, rank, confidence, evidence_state(supported/insufficient), source(code/screen) | `unknown` 허용. 근거 없으면 생성하지 않음. 후보는 가설이며 확정 원인이 아님. 기술 실패는 후보를 만들지 않음 |
+| PersonaGenerationRevision | plan_revision, input_hash, seed, generator_version, source(generated/edited), ratio_is_assumption | 같은 입력·seed 재현. 보정 전 비율은 가정 표시. 확정 후 변경은 새 revision |
+| VariableRangeSuggestion | generation_revision, variable_key, min, max, source(code/screen/default), code_hint | 코드에서 읽은 범위는 제안일 뿐 행동 모델에 직접 주입하지 않음. 변수 척도는 미정 |
+| OrchestrationStep | project, subject_kind/참조, step, state(pass/fail/blocked/frontier), reason_code, occurred_at | 어디서 왜 멈췄는지 추적. subject는 명시 관계와 check constraint로 제한 |
+| CriticFinding | project, target_kind/참조, severity, claim, evidence_ref, blocks_confirmation, state(open/resolved) | 자문 기록. 통과 판정 권한 없음, 차단만 가능. 생산자의 추론은 저장하지 않음 |
+
+공통 제약은 기존 절과 같다: workspace 소유권 검사, revision 불변, 비밀값·개인정보·코드 원문·원본 미디어 미저장, 큰 데이터는 Artifact 참조. 탐색 그래프는 한 Discovery에 노드가 많을 수 있어 `(discovery,signature)` unique와 `(discovery,depth)` 인덱스를 후보로 두되 실제 카디널리티를 측정하기 전에는 확정하지 않는다. 엔진(PostgreSQL 등)은 JSONB·부분 인덱스·check constraint 사용 여부와 함께 Django 담당과 확정한다.
+
 ## 4. DB와 파일 저장 설계
 
 - 자주 조회하는 키/상태/시각/소유권/버전은 관계형 컬럼. 유동적인 관측 신호·정책 snapshot만 크기 제한 JSON으로 저장한다.
@@ -118,7 +165,7 @@ erDiagram
 - 모든 자식 리소스는 최종 workspace까지 검사한다. 조인 최적화를 위해 workspace_id를 중복 저장하면 부모와 일치하도록 서비스/DB 검사한다.
 - 이미지/코드 중복 제거는 기본적으로 **workspace 범위**다. 다른 고객에게 hash 적중 여부를 노출하지 않는다.
 - 이벤트는 append 중심, 상태/최근 관측/집계는 별도 materialized projection으로 관리한다. 한 화면 갱신 때 매번 전체 이벤트를 재집계하지 않는다.
-- 우선 인덱스 후보: `Run(workspace,created_at,id)`, `Session(attempt,state,id)`, `RunEvent(attempt,ingest_sequence)`, `Observation(session,step)`, `IssueOccurrence(project,task_key,observed_at)`, `Artifact(workspace,state,expires_at)`, `UsageEntry(run,purpose,created_at)`.
+- 우선 인덱스 후보: `Run(workspace,created_at,id)`, `Session(attempt,state,id)`, `RunEvent(attempt,ingest_sequence)`, `Observation(session,step)`, `IssueOccurrence(project,task_key,observed_at)`, `Artifact(workspace,state,expires_at)`, `UsageEntry(run,purpose,created_at)`. 자동화 확장(3.1절) 후보: `ExploreNode(discovery,signature)`, `ExploreNode(discovery,depth)`, `FunnelStage(funnel_revision,stage_key)`, `CauseCandidate(issue_occurrence,rank)`, `MediaObservation(observation)`.
 - 실제 쿼리·카디널리티·실행계획으로 인덱스를 확정한다. 무조건 모든 JSON 키에 인덱스를 만들지 않는다. 이벤트 partition/집계 DB 분리는 측정 후 도입한다.
 - 삭제는 DB만 cascade하지 않는다. 실행/lease 정지→객체/캐시/preview 정리→완료 표시의 재시도 가능한 삭제 작업을 둔다. 보존·감사 요구는 PO와 확정한다.
 

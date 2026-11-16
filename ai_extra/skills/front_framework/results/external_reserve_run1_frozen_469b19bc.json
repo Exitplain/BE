@@ -1,0 +1,189 @@
+{
+  "schema_version": "1.0",
+  "script": "<repo>/ai_extra/skills/front_framework/verify_script/check_external.py",
+  "requirements": [
+    "FUNNEL-01"
+  ],
+  "verdict": "fail",
+  "reason": "below_threshold",
+  "details": {
+    "split": "reserve",
+    "summary": {
+      "apps": 7,
+      "skipped_not_checked_out": [],
+      "route_recall": 0.917,
+      "route_precision": 1.0,
+      "edge_precision": 0.457,
+      "edge_recall": 0.571
+    },
+    "thresholds": {
+      "min_route_recall": 0.95,
+      "min_edge_precision": 0.9,
+      "min_edge_recall": 0.8
+    },
+    "per_app": [
+      {
+        "app": "auth-router-provider",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 0.0,
+        "edge_recall": 0.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [
+          [
+            "/login",
+            "/"
+          ],
+          [
+            "/logout",
+            "/"
+          ],
+          [
+            "/protected",
+            "/login"
+          ]
+        ],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "custom-link",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "data-router",
+        "split": "reserve",
+        "route_recall": 0.75,
+        "route_precision": 1.0,
+        "edge_precision": 0.0,
+        "edge_recall": 0.0,
+        "missing_routes": [
+          "/todos"
+        ],
+        "extra_routes": [],
+        "missing_edges": [
+          [
+            "/todos",
+            "/todos/:id"
+          ]
+        ],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "lazy-loading-router-provider",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 0.2,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [
+          [
+            "/dashboard",
+            "/dashboard"
+          ],
+          [
+            "/dashboard",
+            "/dashboard/messages"
+          ],
+          [
+            "/dashboard/messages",
+            "/dashboard"
+          ],
+          [
+            "/dashboard/messages",
+            "/dashboard/messages"
+          ]
+        ],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "modal-route-with-outlet",
+        "split": "reserve",
+        "route_recall": 0.667,
+        "route_precision": 1.0,
+        "edge_precision": 0.0,
+        "edge_recall": 0.0,
+        "missing_routes": [
+          "/gallery"
+        ],
+        "extra_routes": [],
+        "missing_edges": [
+          [
+            "/",
+            "/gallery"
+          ],
+          [
+            "/gallery",
+            "/gallery/img/:id"
+          ]
+        ],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "search-params",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "ok",
+        "reason": null
+      },
+      {
+        "app": "custom-filter-link",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "ok",
+        "reason": null
+      }
+    ]
+  },
+  "started_at": "2026-11-15T11:36:40.982331+00:00",
+  "argv": [
+    "ai_extra/skills/front_framework/verify_script/check_external.py",
+    "--apps-root",
+    "react-router-examples=<scratch>/heldout/rr-examples/repo",
+    "--split",
+    "reserve",
+    "--min-route-recall",
+    "0.95",
+    "--min-edge-precision",
+    "0.90",
+    "--min-edge-recall",
+    "0.80"
+  ],
+  "python": "/opt/homebrew/opt/python@3.13/bin/python3.13",
+  "source_sha256": "196dc20bf42bf0f8029cbff82a0823a5e308e81b9230e149005abac8601ddf07"
+}

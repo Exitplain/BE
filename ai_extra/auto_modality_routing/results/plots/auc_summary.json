@@ -1,0 +1,60 @@
+{
+ "catboost": {
+  "test_seen": {
+   "per_class_auc": {
+    "canvas": 1.0,
+    "image": 0.999,
+    "media_ui": 0.999,
+    "text": 0.999
+   },
+   "macro_auc": 0.999
+  },
+  "test_unseen": {
+   "per_class_auc": {
+    "canvas": 0.034,
+    "image": 0.896,
+    "media_ui": 0.926,
+    "text": 0.316
+   },
+   "macro_auc": 0.543
+  }
+ },
+ "tree_depth3": {
+  "test_seen": {
+   "per_class_auc": {
+    "canvas": 0.893,
+    "image": 0.919,
+    "media_ui": 0.956,
+    "text": 0.951
+   },
+   "macro_auc": 0.93
+  },
+  "test_unseen": {
+   "per_class_auc": {
+    "canvas": 0.956,
+    "image": 0.844,
+    "media_ui": 0.967,
+    "text": 0.333
+   },
+   "macro_auc": 0.775
+  }
+ },
+ "catboost_unseen_template_auc": {
+  "chart": {
+   "class": "canvas",
+   "auc_vs_other_classes": 0.034
+  },
+  "dashboard": {
+   "class": "text",
+   "auc_vs_other_classes": 0.316
+  },
+  "playlist": {
+   "class": "media_ui",
+   "auc_vs_other_classes": 0.926
+  },
+  "poster": {
+   "class": "image",
+   "auc_vs_other_classes": 0.896
+  }
+ }
+}

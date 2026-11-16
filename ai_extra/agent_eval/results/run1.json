@@ -1,0 +1,134 @@
+{
+ "n_sessions": 4800,
+ "seed": 20261115,
+ "n_per_condition": 300,
+ "dropout_auc": {
+  "all": 0.8046,
+  "mild": 0.7996,
+  "strong": 0.8096
+ },
+ "false_alarm_rate_clean": 0.005,
+ "detection_rate": {
+  "input_burden": {
+   "mild": 0.58,
+   "strong": 0.6
+  },
+  "navigation": {
+   "mild": 0.2,
+   "strong": 0.543
+  },
+  "cost": {
+   "mild": 0.107,
+   "strong": 0.09
+  },
+  "value": {
+   "mild": 0.0,
+   "strong": 0.0
+  },
+  "trust": {
+   "mild": 0.033,
+   "strong": 0.027
+  },
+  "technical": {
+   "mild": 0.0,
+   "strong": 0.0
+  },
+  "accessibility": {
+   "mild": 0.0,
+   "strong": 0.01
+  }
+ },
+ "dropout_auc_by_cause": {
+  "input_burden": 0.9883,
+  "navigation": 0.9753,
+  "cost": 0.924,
+  "value": 0.6724,
+  "trust": 0.8488,
+  "technical": 0.5416,
+  "accessibility": 0.682
+ },
+ "detector_auc": {
+  "input_burden": 1.0,
+  "navigation": 0.9995,
+  "cost": 1.0,
+  "value": 1.0,
+  "trust": 1.0,
+  "technical": 0.9246,
+  "accessibility": 1.0
+ },
+ "cross_talk_ge_30pct_of_own": {},
+ "primary_cause_accuracy": 0.9954,
+ "primary_cause_n": 657,
+ "primary_cause_recall_by_injected": {
+  "input_burden": 1.0,
+  "navigation": 0.996,
+  "cost": 1.0,
+  "value": null,
+  "trust": 1.0,
+  "technical": null,
+  "accessibility": 0.333
+ },
+ "dose_response_input_burden": {
+  "low_patience": {
+   "0": 0.04,
+   "1": 0.9733333333333334,
+   "2": 0.97,
+   "3": 0.9466666666666667,
+   "4": 0.9633333333333334,
+   "5": 0.9633333333333334,
+   "6": 0.9766666666666667,
+   "7": 0.97,
+   "8": 0.9733333333333334
+  },
+  "high_patience": {
+   "0": 0.0,
+   "1": 0.3,
+   "2": 0.29333333333333333,
+   "3": 0.26,
+   "4": 0.3233333333333333,
+   "5": 0.2833333333333333,
+   "6": 0.27,
+   "7": 0.28,
+   "8": 0.2966666666666667
+  }
+ },
+ "checks": {
+  "dropout_auc_all": {
+   "value": 0.8046,
+   "op": ">=",
+   "threshold": 0.85,
+   "pass": false
+  },
+  "dropout_auc_mild": {
+   "value": 0.7996,
+   "op": ">=",
+   "threshold": 0.7,
+   "pass": true
+  },
+  "detector_auc_min": {
+   "value": 0.9246,
+   "op": ">=",
+   "threshold": 0.9,
+   "pass": true
+  },
+  "false_alarm_rate_clean": {
+   "value": 0.005,
+   "op": "<=",
+   "threshold": 0.1,
+   "pass": true
+  },
+  "primary_cause_accuracy": {
+   "value": 0.9954,
+   "op": ">=",
+   "threshold": 0.8,
+   "pass": true
+  },
+  "unexpected_cross_talk_pairs": {
+   "value": 0,
+   "op": "==",
+   "threshold": 0,
+   "pass": true
+  }
+ },
+ "verdict": "fail"
+}

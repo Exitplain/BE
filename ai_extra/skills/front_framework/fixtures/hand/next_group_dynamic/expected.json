@@ -1,0 +1,2 @@
+{ "router": "next-app", "entry": "/", "success": "/done", "status": "ok",
+  "funnel": ["/", "/browse", "/item/[id]", "/done"], "needs_gui_check": ["/item/[id]"], "unresolved_kinds": [] }

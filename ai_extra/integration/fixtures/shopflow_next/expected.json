@@ -1,0 +1,4 @@
+{ "entry": "/", "success": "/done",
+  "expected_keys": { "/": "landing", "/products": "browse", "/products/:id": "detail", "/signup": "signup", "/checkout": "payment", "/done": "complete" },
+  "expected_stage_paths": { "/": "landing", "/products": "browse", "/signup": "signup", "/checkout": "payment", "/done": "complete" },
+  "expected_collisions": ["/products/[id]"] }

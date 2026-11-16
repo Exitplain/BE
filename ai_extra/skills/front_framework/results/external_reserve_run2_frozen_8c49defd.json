@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "script": "<repo>/ai_extra/skills/front_framework/verify_script/check_external.py",
+  "requirements": [
+    "FUNNEL-01"
+  ],
+  "verdict": "pass",
+  "reason": null,
+  "details": {
+    "split": "reserve",
+    "summary": {
+      "apps": 6,
+      "skipped_not_checked_out": [],
+      "route_recall": 1.0,
+      "route_precision": 1.0,
+      "edge_precision": 1.0,
+      "edge_recall": 0.861
+    },
+    "thresholds": {
+      "min_route_recall": 0.95,
+      "min_edge_precision": 0.9,
+      "min_edge_recall": 0.8
+    },
+    "per_app": [
+      {
+        "app": "with-supabase",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 0.5,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [
+          [
+            "/protected",
+            "/auth/login"
+          ]
+        ],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "image-component",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "ok",
+        "reason": null
+      },
+      {
+        "app": "prisma-postgres",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 0.667,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [
+          [
+            "/posts",
+            "/posts"
+          ],
+          [
+            "/posts",
+            "/posts/[id]"
+          ]
+        ],
+        "extra_edges": [],
+        "status": "ok",
+        "reason": null
+      },
+      {
+        "app": "cms-buttercms",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "blocked",
+        "reason": "entry_not_found"
+      },
+      {
+        "app": "auth0",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      },
+      {
+        "app": "with-prefetching",
+        "split": "reserve",
+        "route_recall": 1.0,
+        "route_precision": 1.0,
+        "edge_precision": 1.0,
+        "edge_recall": 1.0,
+        "missing_routes": [],
+        "extra_routes": [],
+        "missing_edges": [],
+        "extra_edges": [],
+        "status": "unreachable",
+        "reason": "success_not_reachable_from_entry"
+      }
+    ]
+  },
+  "started_at": "2026-11-15T11:39:21.038924+00:00",
+  "argv": [
+    "ai_extra/skills/front_framework/verify_script/check_external.py",
+    "--apps-root",
+    "react-router-examples=<scratch>/heldout/rr-examples/repo",
+    "--apps-root",
+    "nextjs-examples=<scratch>/heldout/nextjs/repo",
+    "--split",
+    "reserve",
+    "--min-route-recall",
+    "0.95",
+    "--min-edge-precision",
+    "0.90",
+    "--min-edge-recall",
+    "0.80"
+  ],
+  "python": "/opt/homebrew/opt/python@3.13/bin/python3.13",
+  "source_sha256": "59643a356f74b5d2549971b53128c808f6810c968ae8ed4c8e3e24aac20db46b"
+}

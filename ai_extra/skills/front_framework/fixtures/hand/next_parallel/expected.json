@@ -1,0 +1,2 @@
+{ "router": "next-app", "entry": "/", "success": "/end", "status": "ok",
+  "funnel": ["/", "/end"], "needs_gui_check": [], "unresolved_kinds": ["parallel_route"] }

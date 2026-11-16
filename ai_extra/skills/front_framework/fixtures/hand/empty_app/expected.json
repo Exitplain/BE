@@ -1,0 +1,2 @@
+{ "router": "react-router-v6", "entry": "/", "success": "/x", "status": "blocked", "reason": "no_routes_found",
+  "funnel": null, "needs_gui_check": [], "unresolved_kinds": [] }

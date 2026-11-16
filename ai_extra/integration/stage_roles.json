@@ -1,0 +1,11 @@
+{
+  "_note": "Contract vocabulary, not detection vocabulary: must equal FUNNEL_KEYS in agent/funnel.py (verified by check_stage_paths_contract.py). Roles say which STRUCTURAL signal assigns which stage.",
+  "order": ["landing", "browse", "detail", "cart", "signup", "payment", "complete"],
+  "entry": "landing",
+  "success": "complete",
+  "detail": "detail",
+  "browse": "browse",
+  "signup": "signup",
+  "payment": "payment",
+  "min_payment_inputs": 3
+}

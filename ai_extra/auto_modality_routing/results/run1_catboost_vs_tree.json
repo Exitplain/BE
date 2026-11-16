@@ -1,0 +1,502 @@
+{
+ "data": "<scratch>/mod_data",
+ "tau": 0.6,
+ "n": {
+  "train": 165,
+  "val": 44,
+  "test_seen": 88,
+  "test_unseen": 60,
+  "ood": 30
+ },
+ "split_hash_leaks_vs_train": {
+  "val": 0,
+  "test_seen": 0,
+  "test_unseen": 0,
+  "ood": 0
+ },
+ "models": {
+  "majority": {
+   "val": {
+    "accuracy": 0.2727,
+    "macro_f1": 0.1071,
+    "confusion": [
+     [
+      0,
+      8,
+      0,
+      0
+     ],
+     [
+      0,
+      12,
+      0,
+      0
+     ],
+     [
+      0,
+      12,
+      0,
+      0
+     ],
+     [
+      0,
+      12,
+      0,
+      0
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 0.0,
+     "audio": 0.0,
+     "form": 0.0,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 0.0,
+     "podcast": 0.0,
+     "product": 1.0,
+     "shapes": 0.0,
+     "table": 0.0,
+     "video": 0.0
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.2727
+   },
+   "test_seen": {
+    "accuracy": 0.2727,
+    "macro_f1": 0.1071,
+    "confusion": [
+     [
+      0,
+      16,
+      0,
+      0
+     ],
+     [
+      0,
+      24,
+      0,
+      0
+     ],
+     [
+      0,
+      24,
+      0,
+      0
+     ],
+     [
+      0,
+      24,
+      0,
+      0
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 0.0,
+     "audio": 0.0,
+     "form": 0.0,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 0.0,
+     "podcast": 0.0,
+     "product": 1.0,
+     "shapes": 0.0,
+     "table": 0.0,
+     "video": 0.0
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.2727
+   },
+   "test_unseen": {
+    "accuracy": 0.25,
+    "macro_f1": 0.1,
+    "confusion": [
+     [
+      0,
+      15,
+      0,
+      0
+     ],
+     [
+      0,
+      15,
+      0,
+      0
+     ],
+     [
+      0,
+      15,
+      0,
+      0
+     ],
+     [
+      0,
+      15,
+      0,
+      0
+     ]
+    ],
+    "per_template_accuracy": {
+     "chart": 0.0,
+     "dashboard": 0.0,
+     "playlist": 0.0,
+     "poster": 1.0
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.25
+   },
+   "ood_abstain_rate": 0.0,
+   "ood_predicted": {
+    "image": 30
+   }
+  },
+  "tree_depth3": {
+   "val": {
+    "accuracy": 0.8864,
+    "macro_f1": 0.8722,
+    "confusion": [
+     [
+      5,
+      2,
+      1,
+      0
+     ],
+     [
+      0,
+      12,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      11,
+      1
+     ],
+     [
+      0,
+      0,
+      1,
+      11
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 0.75,
+     "audio": 0.75,
+     "form": 1.0,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 1.0,
+     "podcast": 1.0,
+     "product": 1.0,
+     "shapes": 0.25,
+     "table": 1.0,
+     "video": 1.0
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.8864
+   },
+   "test_seen": {
+    "accuracy": 0.875,
+    "macro_f1": 0.8583,
+    "confusion": [
+     [
+      10,
+      5,
+      1,
+      0
+     ],
+     [
+      2,
+      22,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      23,
+      1
+     ],
+     [
+      0,
+      0,
+      2,
+      22
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 0.875,
+     "audio": 1.0,
+     "form": 0.875,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 0.875,
+     "podcast": 1.0,
+     "product": 0.75,
+     "shapes": 0.375,
+     "table": 1.0,
+     "video": 0.875
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.875
+   },
+   "test_unseen": {
+    "accuracy": 0.4833,
+    "macro_f1": 0.4023,
+    "confusion": [
+     [
+      0,
+      0,
+      0,
+      15
+     ],
+     [
+      1,
+      14,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      15,
+      0
+     ],
+     [
+      1,
+      11,
+      3,
+      0
+     ]
+    ],
+    "per_template_accuracy": {
+     "chart": 0.0,
+     "dashboard": 0.0,
+     "playlist": 1.0,
+     "poster": 0.933
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.4833
+   },
+   "ood_abstain_rate": 0.0,
+   "ood_predicted": {
+    "media_ui": 30
+   }
+  },
+  "catboost": {
+   "val": {
+    "accuracy": 0.9773,
+    "macro_f1": 0.9733,
+    "confusion": [
+     [
+      7,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      12,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      12,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      12
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 1.0,
+     "audio": 1.0,
+     "form": 1.0,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 1.0,
+     "podcast": 1.0,
+     "product": 1.0,
+     "shapes": 0.75,
+     "table": 1.0,
+     "video": 1.0
+    },
+    "abstain_rate": 0.0,
+    "selective_accuracy": 0.9773
+   },
+   "test_seen": {
+    "accuracy": 0.9659,
+    "macro_f1": 0.9662,
+    "confusion": [
+     [
+      15,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      23,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      24,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      23
+     ]
+    ],
+    "per_template_accuracy": {
+     "article": 1.0,
+     "audio": 1.0,
+     "form": 0.875,
+     "gallery": 1.0,
+     "hero": 1.0,
+     "particles": 1.0,
+     "podcast": 1.0,
+     "product": 0.875,
+     "shapes": 0.875,
+     "table": 1.0,
+     "video": 1.0
+    },
+    "abstain_rate": 0.0341,
+    "selective_accuracy": 0.9882
+   },
+   "test_unseen": {
+    "accuracy": 0.3167,
+    "macro_f1": 0.2563,
+    "confusion": [
+     [
+      0,
+      0,
+      0,
+      15
+     ],
+     [
+      0,
+      15,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      2,
+      13
+     ],
+     [
+      0,
+      12,
+      1,
+      2
+     ]
+    ],
+    "per_template_accuracy": {
+     "chart": 0.0,
+     "dashboard": 0.133,
+     "playlist": 0.133,
+     "poster": 1.0
+    },
+    "abstain_rate": 0.0667,
+    "selective_accuracy": 0.2679
+   },
+   "ood_abstain_rate": 0.9333,
+   "ood_predicted": {
+    "media_ui": 30
+   }
+  }
+ },
+ "catboost_top_features": [
+  [
+   "color_entropy",
+   19.5
+  ],
+  [
+   "n_colors_1pct",
+   10.86
+  ],
+  [
+   "row_periodicity",
+   8.36
+  ],
+  [
+   "hue_entropy",
+   7.01
+  ],
+  [
+   "cell_flat",
+   6.77
+  ],
+  [
+   "top_edge",
+   4.71
+  ],
+  [
+   "cell_mid",
+   4.66
+  ],
+  [
+   "std_gray",
+   4.65
+  ]
+ ],
+ "catboost_deterministic_retrain": true,
+ "checks": {
+  "seen_macro_f1": {
+   "value": 0.9662,
+   "op": ">=",
+   "threshold": 0.9,
+   "pass": true
+  },
+  "unseen_macro_f1": {
+   "value": 0.2563,
+   "op": ">=",
+   "threshold": 0.8,
+   "pass": false
+  },
+  "unseen_margin_over_tree": {
+   "value": -0.146,
+   "op": ">=",
+   "threshold": 0.02,
+   "pass": false
+  },
+  "ood_abstain": {
+   "value": 0.9333,
+   "op": ">=",
+   "threshold": 0.8,
+   "pass": true
+  },
+  "seen_abstain": {
+   "value": 0.0341,
+   "op": "<=",
+   "threshold": 0.15,
+   "pass": true
+  },
+  "deterministic_retrain": {
+   "value": true,
+   "op": "==",
+   "threshold": true,
+   "pass": true
+  },
+  "no_hash_leaks": {
+   "value": 0,
+   "op": "==",
+   "threshold": 0,
+   "pass": true
+  }
+ },
+ "verdict": "fail",
+ "seconds": 45.3
+}
