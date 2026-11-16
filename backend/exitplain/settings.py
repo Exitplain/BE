@@ -106,18 +106,45 @@ WSGI_APPLICATION = 'exitplain.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.environ.get('DJANGO_DB_PATH', BASE_DIR / 'db.sqlite3'),
-        # 웹(gunicorn)과 워커가 동시에 쓰므로 'database is locked'를 줄이는 설정.
-        'OPTIONS': {
-            'timeout': 20,
-            'init_command': 'PRAGMA journal_mode=WAL;',
-            'transaction_mode': 'IMMEDIATE',
-        },
+# DB 는 환경변수 DB_ENGINE 으로 고른다. 비워 두면 SQLite(로컬 개발·현재 서버)라서 기존 동작이 그대로다.
+#   DB_ENGINE=postgres 이면 아래 DB_* 값으로 PostgreSQL 에 연결한다 (deploy/POSTGRES.md 참고).
+#   DB_NAME, DB_USER, DB_PASSWORD 는 필수. DB_HOST(기본 127.0.0.1), DB_PORT(기본 5432)
+#   DB_SSLMODE: RDS 처럼 암호화 연결이 필요하면 require. DB_CONN_MAX_AGE: 연결 재사용 초(기본 60)
+DB_ENGINE = os.environ.get('DB_ENGINE', 'sqlite').strip().lower()
+
+if DB_ENGINE in ('postgres', 'postgresql'):
+    from django.core.exceptions import ImproperlyConfigured
+    _missing = [k for k in ('DB_NAME', 'DB_USER', 'DB_PASSWORD') if not os.environ.get(k)]
+    if _missing:
+        raise ImproperlyConfigured(f"DB_ENGINE=postgres 에는 환경변수 {', '.join(_missing)} 가 필요합니다.")
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ['DB_NAME'],
+            'USER': os.environ['DB_USER'],
+            'PASSWORD': os.environ['DB_PASSWORD'],
+            'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+            'PORT': os.environ.get('DB_PORT', '5432'),
+            'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60)),
+            'OPTIONS': {'sslmode': os.environ['DB_SSLMODE']} if os.environ.get('DB_SSLMODE') else {},
+        }
     }
-}
+elif DB_ENGINE == 'sqlite':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.environ.get('DJANGO_DB_PATH', BASE_DIR / 'db.sqlite3'),
+            # 웹(gunicorn)과 워커가 동시에 쓰므로 'database is locked'를 줄이는 설정.
+            'OPTIONS': {
+                'timeout': 20,
+                'init_command': 'PRAGMA journal_mode=WAL;',
+                'transaction_mode': 'IMMEDIATE',
+            },
+        }
+    }
+else:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(f"DB_ENGINE 은 sqlite 또는 postgres 여야 합니다 (현재: {DB_ENGINE!r}).")
 
 
 # Password validation
