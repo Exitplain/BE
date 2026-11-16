@@ -17,6 +17,37 @@ OBSERVE = """() => {
 }"""
 
 
+_USERNAME_FIELDS = ", ".join(f"{s}:visible" for s in (
+    "input[type=email]", "input[autocomplete=username]", "input[autocomplete=email]", "input[type=text]", "input:not([type])"))
+_SUBMIT = "form button[type=submit]:visible, form input[type=submit]:visible"
+
+
+async def login(page, login_url, username, password, timeout=15000):
+    """테스트 계정으로 로그인한다. 성공하면 True.
+
+    모델(정책)이 아니라 이 코드가 직접 입력한다. 아이디·비밀번호는 화면 입력칸에만 넣고
+    이벤트·스크린샷·로그·예외 메시지 어디에도 남기지 않는다. 화면에서 비밀번호 칸이 사라지거나
+    로그인 화면을 벗어나면 성공으로 본다.
+    """
+    login_path = urlsplit(login_url).path.rstrip("/") or "/"
+    await page.goto(login_url, wait_until="domcontentloaded", timeout=timeout)
+    secret = page.locator("input[type=password]:visible").first
+    await secret.wait_for(state="visible", timeout=timeout)
+    await page.locator(_USERNAME_FIELDS).first.fill(username, timeout=timeout)
+    await secret.fill(password, timeout=timeout)
+    submit = page.locator(_SUBMIT).first
+    if await submit.count():
+        await submit.click(timeout=timeout)
+    else:
+        await secret.press("Enter")
+    for _ in range(timeout // 250):
+        left = (urlsplit(page.url).path.rstrip("/") or "/") != login_path
+        if left or not await page.locator("input[type=password]:visible").count():
+            return True
+        await page.wait_for_timeout(250)
+    return False
+
+
 def origin(url):
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}"

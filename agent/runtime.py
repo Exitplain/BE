@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
 from .behavior import PersonaMeter
-from .browser import observe, act, origin
+from .browser import observe, act, origin, login
 from .funnel import funnel_stage
 from .schemas import RunInput, SessionResult
 
@@ -24,11 +24,16 @@ ISSUE_SUMMARIES = {
 }
 
 
-async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None):
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None,
+                      credentials=None):
     """Call from a Django worker's async boundary; callbacks may be sync or async.
 
     Only trusted test sites are supported. Exact-origin routing is not an SSRF firewall.
     Each invocation creates a unique attempt directory; no existing evidence is overwritten.
+    credentials: {persona_id: {"username", "password"}} for config.login_url. Kept in memory only, never written.
     """
     attempt = uuid4().hex
     root = Path(output_dir) / config.run_id / attempt
@@ -66,14 +71,18 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     folder.mkdir()
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
-                             "calls": 0, "input": 0, "output": 0, "issues": [], "artifact": None}
+                             "calls": 0, "input": 0, "output": 0, "issues": [], "artifact": None, "blocked_writes": 0}
                     context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
                                                         service_workers="block")
                     policy = None
                     blocked = []
+                    logging_in = [config.login_url is not None]   # 로그인 요청(POST)은 read_only 여도 보낸다
                     async def guard(route):
                         if origin(route.request.url) not in config.allowed_origins:
                             blocked.append(route.request.url)
+                            await route.abort()
+                        elif config.read_only and not logging_in[0] and route.request.method not in SAFE_METHODS:
+                            state["blocked_writes"] += 1      # 운영 자료가 바뀌지 않게 쓰기 요청만 막는다
                             await route.abort()
                         else:
                             await route.continue_()
@@ -102,6 +111,20 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             state.update(status="cancelled", reason="Cancellation requested")
                             return
                         policy = policy_factory()
+                        if config.login_url:
+                            account = (credentials or {}).get(persona.id)
+                            ok = False
+                            if account:
+                                try:
+                                    ok = await login(page, config.login_url, account["username"], account["password"])
+                                except Exception:
+                                    ok = False            # 예외 문구에 입력값이 섞이지 않게 내용은 버린다
+                            logging_in[0] = False
+                            await emit("login.completed", sid, {"ok": ok, "has_account": bool(account)})
+                            if not ok:
+                                state.update(status="blocked_auth",
+                                             reason="Test account login failed" if account else "No test account for persona")
+                                return
                         response = await page.goto(config.target_url, wait_until="domcontentloaded", timeout=15000)
                         if response and response.status >= 400:
                             state.update(status="site_failure", reason=f"HTTP {response.status}")
@@ -198,7 +221,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         duration_seconds=round(time.monotonic()-started, 3), model_calls=state["calls"],
                         input_tokens=state["input"], output_tokens=state["output"],
                         issues=state["issues"], final_artifact=state["artifact"],
-                        terminal_stage=stage, stages_reached=list(meter.stages))
+                        terminal_stage=stage, stages_reached=list(meter.stages), blocked_writes=state["blocked_writes"])
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
                     await emit("session.finished", sid, result.model_dump())
                     return result

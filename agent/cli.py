@@ -9,6 +9,26 @@ from .demo import demo_server
 from .shop import shop_server
 
 
+CREDENTIALS_ENV = "DROPSPOT_CREDENTIALS"
+
+
+def read_credentials():
+    """테스트 계정: 환경변수 DROPSPOT_CREDENTIALS = {"페르소나ID": {"username": ..., "password": ...}}.
+
+    입력 파일(input.json)은 실행 폴더에 그대로 복사되므로 계정은 넣지 않고 이 환경변수로만 받는다.
+    읽은 뒤 바로 지워서 이 프로세스가 띄우는 다른 프로세스에 물려주지 않는다.
+    """
+    import os
+    raw = os.environ.pop(CREDENTIALS_ENV, "")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(pid): {"username": str(v["username"]), "password": str(v["password"])} for pid, v in data.items()}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise SystemExit(f"{CREDENTIALS_ENV} must be JSON {{persona_id: {{username, password}}}}") from None
+
+
 def main():
     parser = argparse.ArgumentParser(description="DropSpot agent: trusted test sites only")
     parser.add_argument("--input", type=Path)
@@ -39,10 +59,12 @@ def main():
         if not os.environ.get("OPENAI_API_KEY"):
             parser.error("OPENAI_API_KEY is not set")
 
+    credentials = read_credentials()
+
     async def run(config):
         reports = []
         for _ in range(args.repeat):
-            report = await execute_run(config, factory, args.output)
+            report = await execute_run(config, factory, args.output, credentials=credentials)
             metadata = {"policy": args.policy, "model": args.model, "model_driven": args.policy == "openai"}
             report.update(metadata)
             Path(report["output_dir"], "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

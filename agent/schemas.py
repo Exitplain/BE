@@ -42,6 +42,11 @@ class RunInput(StrictModel):
     action_interval_seconds: float = Field(default=0, ge=0, le=5)
     # 사이트 분석으로 정한 '경로 → 퍼널 단계' 표 (예: {"/goods": "detail"}). 없으면 경로 단어로 추측
     stage_paths: dict[str, str] = Field(default_factory=dict)
+    # 테스트 계정 로그인 화면. 있으면 과업 전에 페르소나마다 짝지은 계정으로 로그인한다.
+    # 아이디·비밀번호는 여기(파일로 남는 입력)에 넣지 않는다. 실행할 때 따로 받는다 (agent/cli.py DROPSPOT_CREDENTIALS)
+    login_url: str | None = None
+    # 읽기 전용: 로그인 뒤 대상 사이트로 가는 쓰기 요청(POST·PUT·PATCH·DELETE)을 막는다. 운영 계정 자료가 바뀌지 않게
+    read_only: bool = False
 
     @model_validator(mode="after")
     def validate_run(self):
@@ -53,6 +58,8 @@ class RunInput(StrictModel):
         origins = [origin(x) for x in self.allowed_origins]
         if origins != self.allowed_origins or origin(self.target_url) not in origins:
             raise ValueError("Use exact origins and include the target origin")
+        if self.login_url is not None and origin(self.login_url) not in origins:
+            raise ValueError("login_url must be on an allowed origin")
         if not self.success_path.startswith("/"):
             raise ValueError("success_path must start with /")
         if len({p.id for p in self.personas}) != len(self.personas):
@@ -89,3 +96,4 @@ class SessionResult(StrictModel):
     final_artifact: str | None
     terminal_stage: str | None = None                          # 마지막으로 본 화면의 퍼널 단계
     stages_reached: list[str] = Field(default_factory=list)    # 처음 도달한 순서대로
+    blocked_writes: int = 0                                    # read_only 로 막은 쓰기 요청 수
