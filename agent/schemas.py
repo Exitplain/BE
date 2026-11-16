@@ -85,6 +85,8 @@ class SessionResult(StrictModel):
     model_calls: int
     input_tokens: int
     output_tokens: int
+    # 모델별 호출·토큰 (Claude 혼합처럼 한 세션에서 모델을 둘 이상 쓸 때 비용 계산용). 단일 모델 정책은 비어 있다
+    usage_by_model: dict[str, dict[str, int]] = Field(default_factory=dict)
     issues: list[dict]
     final_artifact: str | None
     terminal_stage: str | None = None                          # 마지막으로 본 화면의 퍼널 단계

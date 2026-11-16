@@ -66,7 +66,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     folder.mkdir()
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
-                             "calls": 0, "input": 0, "output": 0, "issues": [], "artifact": None}
+                             "calls": 0, "input": 0, "output": 0, "by_model": {}, "issues": [], "artifact": None}
                     context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
                                                         service_workers="block")
                     policy = None
@@ -151,6 +151,12 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 return
                             state["calls"] += int(getattr(policy, "name", "") != "scripted_fixture")
                             action, usage = await policy.decide(obs, persona, config.goal, history)
+                            if usage.get("by_model"):        # 한 스텝에 모델을 여러 번 부르는 정책 (Claude 혼합)
+                                for model_id, used in usage["by_model"].items():
+                                    total = state["by_model"].setdefault(model_id, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+                                    for key in total:
+                                        total[key] += used.get(key, 0)
+                                state["calls"] += sum(used.get("calls", 0) for used in usage["by_model"].values()) - 1
                             state["input"] += usage.get("input_tokens", 0)
                             state["output"] += usage.get("output_tokens", 0)
                             if config.max_tokens_per_session and state["input"] + state["output"] >= config.max_tokens_per_session:
@@ -196,7 +202,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         policy=getattr(policy, "name", "custom_or_uninitialized"), model_id=getattr(policy, "model", None),
                         status=state["status"], reason=state["reason"], steps=state["steps"],
                         duration_seconds=round(time.monotonic()-started, 3), model_calls=state["calls"],
-                        input_tokens=state["input"], output_tokens=state["output"],
+                        input_tokens=state["input"], output_tokens=state["output"], usage_by_model=state["by_model"],
                         issues=state["issues"], final_artifact=state["artifact"],
                         terminal_stage=stage, stages_reached=list(meter.stages))
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")

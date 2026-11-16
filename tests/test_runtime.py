@@ -54,6 +54,26 @@ async def test_invalid_target_is_failure_not_dropout(tmp_path):
     assert all(s["status"] == "agent_failure" for s in report["sessions"])
 
 
+async def test_usage_by_model_is_summed_per_session(tmp_path):
+    """한 스텝에 모델을 둘 부르는 정책(Claude 혼합)의 모델별 호출·토큰이 세션 결과에 합산된다."""
+    class TwoModelPolicy(ScriptedPolicy):
+        name = "claude"
+        model = "base-model"
+        async def decide(self, *args):
+            action, _ = await super().decide(*args)
+            by_model = {"base-model": {"calls": 1, "input_tokens": 10, "output_tokens": 1},
+                        "upper-model": {"calls": 1, "input_tokens": 20, "output_tokens": 2}}
+            return action, {"input_tokens": 30, "output_tokens": 3, "by_model": by_model}
+    with demo_server() as base:
+        report = await execute_run(config(base), TwoModelPolicy, tmp_path)
+    for session in report["sessions"]:
+        steps = session["usage_by_model"]["base-model"]["calls"]
+        assert session["status"] == "success" and steps >= 1
+        assert session["model_calls"] == 2 * steps
+        assert session["usage_by_model"]["upper-model"] == {"calls": steps, "input_tokens": 20 * steps, "output_tokens": 2 * steps}
+        assert (session["input_tokens"], session["output_tokens"]) == (30 * steps, 3 * steps)
+
+
 async def test_cancellation_and_time_budget(tmp_path):
     class SlowPolicy:
         async def decide(self, *args):
