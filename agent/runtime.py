@@ -25,6 +25,7 @@ ISSUE_SUMMARIES = {
 
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_CONSECUTIVE_FAILURES = 3     # 행동이 연달아 이만큼 실패하면 기술 실패로 끝낸다
 
 
 async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None,
@@ -92,6 +93,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     page = await context.new_page()
                     page.set_default_timeout(5000)
                     history = []
+                    failures = [0]                    # 연속으로 실패한 행동 수
                     seen_signals = set()
                     meter = PersonaMeter(persona, config.seed)
                     last_action = None
@@ -186,10 +188,21 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             try:
                                 await act(page, action, obs)
                             except Exception as exc:
-                                # 어떤 행동이 왜 실패했는지 남긴다 (예외 문구는 화면·입력값이 섞일 수 있어 종류만)
+                                # 처음 보는 사이트에서는 누를 수 없는 요소를 고를 수 있다. 세션을 바로 끝내지 않고
+                                # 실패를 행동 기록에 남겨 다음 스텝에서 정책이 다른 방법을 고르게 한다.
+                                # (예외 문구는 화면·입력값이 섞일 수 있어 종류만 남긴다)
+                                failures[0] += 1
                                 await emit("action.failed", sid, {"step_id": step_id, "action": action.model_dump(),
                                                                   "error": type(exc).__name__})
-                                raise
+                                history.append({**action.model_dump(), "result": f"failed ({type(exc).__name__}): "
+                                                "this action could not be performed on the current screen"})
+                                last_action = "failed"
+                                if failures[0] >= MAX_CONSECUTIVE_FAILURES:
+                                    state.update(status="agent_failure",
+                                                 reason=f"{MAX_CONSECUTIVE_FAILURES} actions failed in a row")
+                                    return
+                                continue
+                            failures[0] = 0
                             history.append(action.model_dump())
                             last_action = action.kind
                             await emit("action.completed", sid, {"step_id": step_id, "action": action.model_dump()})
