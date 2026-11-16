@@ -67,7 +67,7 @@ class CreateRunTests(WizardMixin, TestCase):
         self.addCleanup(patcher.stop)
 
     def snapshot(self):
-        return PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        return PlanSnapshot.objects.get(pk=self.confirm(self.multi_seed_plan())["plan_revision_id"])
 
     def create(self, snapshot, **kwargs):
         return services.create_run(self.project, snapshot, self.user, **kwargs)

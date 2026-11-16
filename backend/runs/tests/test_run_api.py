@@ -369,7 +369,7 @@ class EndToEndTests(WizardMixin, TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        snapshot_id = self.confirm()["plan_revision_id"]
+        snapshot_id = self.confirm(self.multi_seed_plan())["plan_revision_id"]
         started = self.client.post("/api/v1/runs", {"plan_revision_id": snapshot_id}, format="json",
                                    HTTP_IDEMPOTENCY_KEY="click-1")
         self.assertEqual(started.status_code, 202, started.content)

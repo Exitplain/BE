@@ -55,6 +55,12 @@ class WizardMixin:
         self.assertEqual(res.status_code, 200, res.content)
         return res.json()
 
+    def multi_seed_plan(self, seed_count=3):
+        """시드 기본값은 1이다. 과업 × 시드 동작을 보는 테스트는 시드를 여러 개로 명시한다."""
+        res = self.patch(self.ready_plan(), {"limits": {"seed_count": seed_count}})
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.json()
+
     def confirm(self, plan=None):
         plan = plan or self.ready_plan()
         res = self.client.post(f"/api/v1/plans/{plan['id']}/confirmations", {"revision": plan["revision"]},

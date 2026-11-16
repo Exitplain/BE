@@ -12,7 +12,7 @@ from plans.run_input import RunInputError, build_run_input, build_run_inputs
 @patch("discoveries.services.run_discovery", side_effect=fake_discovery)
 class RunInputTests(WizardMixin, TestCase):
     def snapshot(self):
-        return PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        return PlanSnapshot.objects.get(pk=self.confirm(self.multi_seed_plan())["plan_revision_id"])
 
     def test_one_input_per_task_and_seed(self, _):
         inputs = build_run_inputs(self.snapshot(), run_id="run_42")
@@ -60,7 +60,7 @@ class RunInputTests(WizardMixin, TestCase):
     def test_preview_endpoint(self, _):
         snap = self.confirm()
         res = self.client.get(f"/api/v1/plan-revisions/{snap['plan_revision_id']}/run-inputs").json()
-        self.assertEqual(len(res["items"]), 6)
+        self.assertEqual(len(res["items"]), 2)             # 과업 2 × 기본 시드 1
         self.assertEqual(len(res["not_passed_to_agent"]), 3)
         self.assertTrue(res["not_passed_to_agent"][1].startswith("limits.cost_cap"))
 

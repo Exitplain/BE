@@ -57,7 +57,7 @@ class WorkerBase(WizardMixin, TestCase):
         CALLS.clear()
 
     def new_run(self):
-        snapshot = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        snapshot = PlanSnapshot.objects.get(pk=self.confirm(self.multi_seed_plan())["plan_revision_id"])
         return services.create_run(self.project, snapshot, self.user)[0]
 
     def worker(self, **kwargs):

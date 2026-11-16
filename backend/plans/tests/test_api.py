@@ -112,7 +112,7 @@ class ConfirmationTests(WizardMixin, TestCase):
     def test_review_summary(self, _):
         review = self.ready_plan()["review"]
         self.assertEqual(review["blocking"], [])
-        self.assertEqual(review["total_sessions"], 20 * 2 * 3)
+        self.assertEqual(review["total_sessions"], 20 * 2 * 1)       # 페르소나 × 과업 × 기본 시드 1
 
     def test_confirm_creates_immutable_snapshot(self, _):
         snap = self.confirm()
@@ -122,17 +122,18 @@ class ConfirmationTests(WizardMixin, TestCase):
         self.assertEqual(len(data["personas"]), 20)
         self.assertEqual([s["representative"] for s in data["segments"]], ["P-001", "P-006", "P-011", "P-016"])
         self.assertEqual(data["tasks"][0]["funnel"][0]["id"], "stage_landing")
-        self.assertEqual(data["total_sessions"], 120)
+        self.assertEqual(data["total_sessions"], 40)
         self.assertEqual(PersonaSnapshot.objects.count(), 20)
 
         # 같은 revision 재확정은 409, 계획을 고친 뒤 확정하면 새 스냅샷
         res = self.client.post(f"/api/v1/plans/{snap['plan_id']}/confirmations", {"revision": 2}, format="json")
         self.assertEqual(res.json()["error"]["code"], "ALREADY_CONFIRMED")
         plan = self.client.get(f"/api/v1/plans/{snap['plan_id']}").json()
-        plan = self.patch(plan, {"limits": {"seed_count": 1}}).json()
+        plan = self.patch(plan, {"limits": {"seed_count": 3}}).json()
         snap2 = self.confirm(plan)
         self.assertNotEqual(snap2["plan_revision_id"], snap["plan_revision_id"])
-        self.assertEqual(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["limits"]["seed_count"], 3)
+        self.assertEqual(PlanSnapshot.objects.get(pk=snap["plan_revision_id"]).data["limits"]["seed_count"], 1)
+        self.assertEqual(snap2["data"]["total_sessions"], 120)
 
     def test_confirm_after_discovery_expired(self, _):
         plan = self.ready_plan()

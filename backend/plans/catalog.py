@@ -19,11 +19,13 @@ DEFAULT_SEGMENTS = [{"id": s, "count": 5} for s in SEGMENT_IDS]
 
 # 실행 조건. Figma P05b: 모바일 390 · 동시 5세션 · 요청 간격 1초 · 시드 3회 · 스텝 40 · 5분 · 비용 상한(값 확인 필요)
 # 범위는 agent.schemas.RunInput 상한과 같게 둔다 (동시 실행 1~5, 요청 간격 0~5초).
+# 시드 기본값은 Figma의 3회 대신 1회로 둔다. 실행 1회 세션 수 = 페르소나 × 과업 × 시드라서
+# 3회면 기본 실행이 240세션이 되어 요금제 포함량을 넘는다. 3회는 정밀 검증 때 고르게 한다.
 DEFAULT_LIMITS = {
     "viewport_width": 390,
     "concurrency": 5,
     "request_interval_seconds": 1.0,
-    "seed_count": 3,
+    "seed_count": 1,
     "max_steps": 40,
     "timeout_seconds": 300,
     "cost_cap": None,
