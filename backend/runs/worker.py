@@ -17,7 +17,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
@@ -109,7 +109,8 @@ class Worker:
         last_beat = 0.0
         try:
             while pending or jobs:
-                close_old_connections()
+                if not connection.in_atomic_block:
+                    close_old_connections()
                 cancelled = Run.objects.filter(pk=run.pk, cancel_requested_at__isnull=False).exists()
                 if cancelled:
                     self._cancel_all(run, jobs, pending)
