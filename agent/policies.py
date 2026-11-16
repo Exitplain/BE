@@ -67,6 +67,15 @@ CLAUDE_MODEL = "claude-haiku-4-5"
 CLAUDE_ESCALATION_MODEL = "claude-sonnet-5"
 
 
+def _repeating(history):
+    """같은 대상에 같은 행동을 연달아 두 번 했는가. 설명 문구는 매번 달라서 비교하지 않는다.
+    스크롤·대기는 원래 이어서 하는 행동이라 헤맴으로 보지 않는다."""
+    if len(history) < 2:
+        return False
+    key = lambda a: (a.get("kind"), a.get("target_id"), a.get("value"))
+    return key(history[-1]) == key(history[-2]) and history[-1].get("kind") not in {"scroll", "wait"}
+
+
 class ClaudePolicy:
     """Claude 두뇌. 평소 스텝은 기본 모델(Haiku)이 고르고, 막힌 순간에만 상위 모델(Sonnet)에게 묻는다.
 
@@ -104,7 +113,7 @@ class ClaudePolicy:
                                          "data": base64.b64encode(observation["screenshot"]).decode()}},
             {"type": "text", "text": _step_text(observation, persona, goal, history)},
         ]
-        stuck = len(history) >= 2 and history[-1] == history[-2]
+        stuck = _repeating(history)
         by_model = {}
 
         async def ask(model):

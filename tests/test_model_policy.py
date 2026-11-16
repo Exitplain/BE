@@ -81,13 +81,27 @@ async def test_claude_asks_sonnet_before_giving_up(monkeypatch, first):
 
 async def test_claude_goes_straight_to_sonnet_when_repeating_the_same_action(monkeypatch):
     policy, calls = claude_policy(monkeypatch, [(STOP, "end_turn")])
-    same = CLICK.model_dump()
+    # 실제 모델은 같은 버튼을 눌러도 설명 문구를 매번 다르게 쓴다
+    history = [{**CLICK.model_dump(), "explanation": "담기"}, {**CLICK.model_dump(), "explanation": "다시 담기"}]
     try:
-        action, _ = await policy.decide(OBS, Persona(id="A"), "goal", [same, same])
+        action, _ = await policy.decide(OBS, Persona(id="A"), "goal", history)
     finally:
         await policy.close()
     assert action == STOP                       # 상위 모델도 stop 이면 그대로 진행 불가로 끝난다
     assert [c["model"] for c in calls] == ["claude-sonnet-5"]
+
+
+async def test_claude_keeps_haiku_for_ordinary_repeats(monkeypatch):
+    """연속 스크롤이나 다른 버튼 클릭은 헤맴이 아니다 (파일럿에서 스크롤 3번 연속이 정상 탐색이었다)."""
+    scroll = {"kind": "scroll", "target_id": None, "value": "down"}
+    other = [{**CLICK.model_dump()}, {**CLICK.model_dump(), "target_id": "e1"}]
+    for history in ([{**scroll, "explanation": "a"}, {**scroll, "explanation": "b"}], other):
+        policy, calls = claude_policy(monkeypatch, [(CLICK, "end_turn")])
+        try:
+            await policy.decide(OBS, Persona(id="A"), "goal", history)
+        finally:
+            await policy.close()
+        assert [c["model"] for c in calls] == ["claude-haiku-4-5"]
 
 
 async def test_claude_without_any_valid_action_is_a_failure_not_a_guess(monkeypatch):
