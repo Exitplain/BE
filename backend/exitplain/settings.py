@@ -218,6 +218,9 @@ else:
 EXITPLAIN_PROJECT_MODEL = 'projects.Project'
 # 사이트 확인(탐색) 결과 유효 시간(초). docs/API_SPEC.md 4.1의 15분과 같음
 EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
+# 사이트 확인 방식. demo(기본): 로컬 데모 쇼핑몰의 정해진 기능·과업. explore: 입력한 URL을 읽기 전용으로 둘러보고
+# 기능·과업을 모델이 제안한다 (agent/explore.py, ANTHROPIC_API_KEY 필요, 과업은 말로 쓴 성공 기준을 쓴다)
+EXITPLAIN_DISCOVERY_MODE = os.environ.get('EXITPLAIN_DISCOVERY_MODE', 'demo')
 # 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
 EXITPLAIN_PERSONA_GENERATOR = None
 # 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지

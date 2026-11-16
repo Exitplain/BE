@@ -37,6 +37,14 @@ def _entry_url(entry_url, variant, case):
     return urlunsplit(parts._replace(path=parts.path or "/", query=urlencode(query)))
 
 
+def _target_url(site, task):
+    """데모 과업은 ?variant=&case=, 사이트 확인(explore)으로 만든 과업은 사이트 출처 + 과업의 시작 화면."""
+    if task.get("start_path"):
+        parts = urlsplit(site["entry_url"])
+        return urlunsplit((parts.scheme, parts.netloc, task["start_path"], "", ""))
+    return _entry_url(site["entry_url"], site["variant"], task["case"])
+
+
 VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
 
 
@@ -72,10 +80,11 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
     payload = {
         "schema_version": "1.0",
         "run_id": f"{run_id}_{task_id}_s{seed}",
-        "target_url": _entry_url(site["entry_url"], site["variant"], task["case"]),
+        "target_url": _target_url(site, task),
         "allowed_origins": site["allowed_origins"],
         "goal": task["goal"],
-        "success_path": task["success_path"],
+        "success_path": task.get("success_path"),
+        "success_criteria": task.get("success_criteria"),
         "personas": [_agent_persona(p, frustration_enabled) for p in data["personas"]],
         "max_steps": limits["max_steps"],
         "timeout_seconds": limits["timeout_seconds"],

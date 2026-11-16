@@ -21,6 +21,12 @@ def run_discovery(variant):
     return asyncio.run(discover_site(variant))
 
 
+def run_exploration(entry_url, allowed_origins):
+    """처음 보는 URL을 읽기 전용으로 둘러보고 기능·과업 후보를 받는다 (agent/explore.py). 테스트에서는 mock한다."""
+    from agent.explore import discover_url
+    return asyncio.run(discover_url(entry_url, list(allowed_origins)))
+
+
 def _origin(url):
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}"
@@ -44,7 +50,8 @@ def create_discovery(user, project, data):
 
     started = time.monotonic()
     try:
-        result = run_discovery(data["variant"])
+        explore = getattr(settings, "EXITPLAIN_DISCOVERY_MODE", "demo") == "explore"
+        result = run_exploration(entry_url, target["allowed_origins"]) if explore else run_discovery(data["variant"])
     except Exception as exc:
         raise ApiError(503, "SITE_UNREACHABLE", "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요.") from exc
     if not result.get("features"):
@@ -53,7 +60,7 @@ def create_discovery(user, project, data):
     now = timezone.now()
     return Discovery.objects.create(
         project=project, created_by=user, entry_url=entry_url, login_mode=data["login_mode"],
-        variant=data["variant"], features=result["features"], tasks=result.get("tasks", []),
+        variant="explore" if explore else data["variant"], features=result["features"], tasks=result.get("tasks", []),
         note=(result.get("note") or "")[:300], elapsed_seconds=round(time.monotonic() - started, 2),
         expires_at=now + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS),
     )
