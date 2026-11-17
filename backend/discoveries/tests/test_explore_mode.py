@@ -18,6 +18,7 @@ EXPLORED = {
                "success_criteria": "요금제별 가격이 보인다", "success_path": None,
                "start_path": "/", "case": None, "feature_id": "register-feature", "suggested": False}],
     "note": "화면 4개를 읽기 전용으로 둘러봤습니다.",
+    "screen_names": {"/": "홈", "/Register/": "회원가입", "/items/42": "상품 상세"},
 }
 
 
@@ -35,11 +36,15 @@ class ExploreModeTests(WizardMixin, TestCase):
         self.assertEqual(plan["task_ids"], ["start-register"])                    # 추천 과업만 기본 선택
         plan = self.patch(plan, {"audience": self.STEP2["audience"]}).json()
         snapshot = PlanSnapshot.objects.get(pk=self.confirm(plan)["plan_revision_id"])
+        # 화면 역할 이름은 실행 퍼널 단계 ID(정규화 경로)로 저장돼 스냅샷까지 간다 (에이전트 입력에는 없음)
+        self.assertEqual(discovery["screen_names"], {"/": "홈", "/register": "회원가입", "/items/:id": "상품 상세"})
+        self.assertEqual(snapshot.data["screen_names"], discovery["screen_names"])
         run_input = build_run_input(snapshot, run_id="r1", task_id="start-register")
         self.assertEqual(run_input["target_url"], "http://shop.local:8080/")       # 데모 쿼리(?variant=) 없음
         self.assertEqual((run_input["success_path"], run_input["success_criteria"]),
                          (None, "이메일·비밀번호 입력칸이 있는 회원가입 폼이 보인다"))
         self.assertEqual(run_input["run_id"], "r1_start-register_s1")
+        self.assertNotIn("screen_names", run_input)
 
     def test_exploration_failure_is_site_unreachable(self, _):
         with patch("discoveries.services.run_exploration", side_effect=ValueError("시작 화면을 열지 못했습니다.")):

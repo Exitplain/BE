@@ -23,7 +23,7 @@ def create_report(plan_snapshot, records, *, run_ref, source, user=None, run=Non
         raise ApiError(409, "PERSONAS_MISSING", "페르소나가 없는 스냅샷이라 집계할 수 없습니다.")
     data = build_report_data(plan_snapshot.data, records)
     # 실행 퍼널 단계에 화면 역할 이름 (모델 호출이라 DB 잠금 밖에서 한다)
-    apply_role_names(data, project_id=plan_snapshot.plan.project_id)
+    apply_role_names(data, project_id=plan_snapshot.plan.project_id, snapshot_names=plan_snapshot.data.get("screen_names"))
     data["plan_revision_id"] = str(plan_snapshot.id)
     data["run_ref"] = run_ref
     return _save_report(plan_snapshot, data, run_ref=run_ref, source=source, user=user, run=run)
@@ -87,6 +87,18 @@ def session_rows(report, filters):
     return rows
 
 
+def _name_screens(report, detail):
+    """세션 타임라인 화면마다 리포트 실행 퍼널과 같은 역할 이름을 붙인다 (screen: {path, name})."""
+    from .journey import screen_id
+    names = dict(report.plan_snapshot.data.get("screen_names") or {})
+    for task in report.data.get("tasks", []):
+        for stage in (task.get("journey_funnel") or {}).get("stages", []):
+            names[stage["path"]] = stage["name"]          # 리포트 이름이 먼저 (리포트와 같은 이름)
+    for step in detail.get("timeline") or []:
+        path = screen_id(step.get("url") or "/")
+        step["screen"] = {"path": path, "name": names.get(path) or step.get("title") or path}
+
+
 def session_detail(report, task_id, seed, persona_id):
     row = next((r for r in report.data.get("sessions", []) if r["task_id"] == task_id and r["seed"] == seed
                 and r["persona_id"] == persona_id), None)
@@ -101,6 +113,7 @@ def session_detail(report, task_id, seed, persona_id):
             detail = session_files.load_session(attempt, persona_id)
     except session_files.SessionNotFound as exc:
         raise ApiError(409, "SESSION_FILES_MISSING", f"세션 기록을 찾지 못했습니다: {exc}") from exc
+    _name_screens(report, detail)
     task = next((t for t in report.plan_snapshot.data.get("tasks", []) if t["id"] == task_id), {})
     return {"report_id": str(report.id), "run_ref": report.run_ref, "task": {"id": task_id, "name": task.get("name")},
             "seed": seed,

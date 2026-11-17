@@ -15,6 +15,7 @@ class PersonaSnapshot(models.Model):
     # 행동 변수 0~100: patience, digital_literacy, price_sensitivity, trust_need
     variables = models.JSONField(default=dict)
     context = models.CharField(max_length=1000)         # 에이전트에 넘기는 설명
+    avatar = models.CharField(max_length=20, blank=True, default="")   # 화면 캐릭터 (20s·30s·40s·50plus). 표시용, 에이전트에는 안 넘김
     generator = models.CharField(max_length=120)        # fixture-*는 실제 생성값이 아님
     created_at = models.DateTimeField(auto_now_add=True)
 

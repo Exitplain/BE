@@ -20,7 +20,7 @@ class DiscoveryCreateSerializer(serializers.Serializer):
 def discovery_dict(d):
     return {
         "id": str(d.id), "project_id": d.project_id, "entry_url": d.entry_url, "login_mode": d.login_mode,
-        "variant": d.variant, "features": d.features, "tasks": d.tasks, "note": d.note,
+        "variant": d.variant, "features": d.features, "tasks": d.tasks, "note": d.note, "screen_names": d.screen_names,
         "elapsed_seconds": d.elapsed_seconds, "created_at": d.created_at.isoformat(),
         "expires_at": d.expires_at.isoformat(), "expired": d.is_expired,
     }

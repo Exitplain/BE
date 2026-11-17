@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.explore import FeatureDraft, Proposal, TaskDraft, _check, crawl, discover_url
+from agent.explore import FeatureDraft, Proposal, ScreenRole, TaskDraft, _check, crawl, discover_url
 
 PAGES = {
     "/": """<title>홈</title><h1>공부 도우미</h1><a href="/notes">노트</a><a href="https://other.test/x">밖</a>
@@ -130,6 +130,8 @@ async def test_crawl_with_wrong_password_fails_clearly():
 
 def proposal(**overrides):
     base = dict(site_name="공부 도우미",
+                screens=[ScreenRole(path="/", name="홈"), ScreenRole(path="/notes", name="노트 목록"),
+                         ScreenRole(path="/admin", name="관리자"), ScreenRole(path="/pricing", name="홈")],
                 features=[FeatureDraft(id="notes", name="노트", evidence_path="/notes", evidence_label="노트")],
                 tasks=[TaskDraft(id="open-note", name="노트 열기", feature_id="notes", goal="첫 노트를 연다",
                                  success_criteria="노트 본문이 보인다", start_path="/", suggested=True),
@@ -164,6 +166,7 @@ async def test_discover_url_returns_wizard_shape_with_success_criteria():
 
     with site() as (base, _):
         result = await discover_url(base + "/", [base], client=FakeClient())
+    assert result["screen_names"] == {"/": "홈", "/notes": "노트 목록"}   # 둘러보지 않은 화면·중복 이름은 버림
     assert result["project"] == "공부 도우미"
     assert result["features"][0] == {"id": "notes", "name": "노트", "evidence": {"label": "노트", "path": "/notes"},
                                      "verification": "explored_readonly"}

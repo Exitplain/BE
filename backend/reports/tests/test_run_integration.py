@@ -76,6 +76,9 @@ class RunReportTests(WizardMixin, TestCase):
         self.assertEqual(body["primary_cause"]["name"], "입력 부담")
         timeline = body["timeline"]
         self.assertEqual([s["stage_name"] for s in timeline], ["랜딩", "탐색", "상세"])
+        # 리포트 실행 퍼널과 같은 화면 이름 (가짜 에이전트 화면 제목: 반찬로드·이번 주 식탁·장바구니)
+        self.assertEqual([(s["screen"]["path"], s["screen"]["name"]) for s in timeline],
+                         [("/", "반찬로드"), ("/product", "이번 주 식탁"), ("/cart", "장바구니")])
         self.assertEqual(timeline[1]["frictions"][0]["name"], "입력 부담")
         self.assertEqual(timeline[0]["action"]["kind"], "click")
         self.assertRegex(timeline[0]["screenshot"], r"^/api/v1/observations/\d+/screenshot$")

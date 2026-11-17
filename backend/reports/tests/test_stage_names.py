@@ -63,6 +63,12 @@ class ApplyTests(SimpleTestCase):
         apply_role_names(data, client=FakeClient(error=RuntimeError("boom")))
         self.assertEqual(stages(data), stages(DATA))
 
+    def test_site_check_names_apply_without_a_model(self):
+        data = copy.deepcopy(DATA)
+        with patch.dict("os.environ", {}, clear=True):
+            apply_role_names(data, snapshot_names={"/": "홈", "/product": "상품 상세"})
+        self.assertEqual(stages(data), [("/", "홈", "model"), ("/product", "상품 상세", "model"), ("/cart", "장바구니", "title")])
+
     def test_without_key_nothing_is_called(self):
         data = copy.deepcopy(DATA)
         with patch.dict("os.environ", {}, clear=True):
