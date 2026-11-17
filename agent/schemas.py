@@ -26,7 +26,11 @@ class RunInput(StrictModel):
     target_url: str
     allowed_origins: list[str]
     goal: str
-    success_path: str
+    # 성공 판정. 둘 중 하나 이상: 성공 화면 경로(정확히 일치) 또는 말로 쓴 성공 기준(별도 판정 모델이 화면을 보고 판단)
+    success_path: str | None = None
+    success_criteria: str | None = Field(default=None, min_length=1, max_length=500)
+    # 성공 기준 판정 호출 상한 (비용). 새 화면에 들어설 때와 정책이 done 을 고를 때 판정한다
+    max_judgments_per_session: int = Field(default=5, ge=1, le=10)
     personas: list[Persona] = Field(min_length=1, max_length=20)
     max_steps: int = Field(default=20, ge=1, le=100)
     timeout_seconds: float = Field(default=120, gt=0, le=600)
@@ -42,6 +46,11 @@ class RunInput(StrictModel):
     action_interval_seconds: float = Field(default=0, ge=0, le=5)
     # 사이트 분석으로 정한 '경로 → 퍼널 단계' 표 (예: {"/goods": "detail"}). 없으면 경로 단어로 추측
     stage_paths: dict[str, str] = Field(default_factory=dict)
+    # 테스트 계정 로그인 화면. 있으면 과업 전에 페르소나마다 짝지은 계정으로 로그인한다.
+    # 아이디·비밀번호는 여기(파일로 남는 입력)에 넣지 않는다. 실행할 때 따로 받는다 (agent/cli.py DROPSPOT_CREDENTIALS)
+    login_url: str | None = None
+    # 읽기 전용: 로그인 뒤 대상 사이트로 가는 쓰기 요청(POST·PUT·PATCH·DELETE)을 막는다. 운영 계정 자료가 바뀌지 않게
+    read_only: bool = False
 
     @model_validator(mode="after")
     def validate_run(self):
@@ -53,7 +62,11 @@ class RunInput(StrictModel):
         origins = [origin(x) for x in self.allowed_origins]
         if origins != self.allowed_origins or origin(self.target_url) not in origins:
             raise ValueError("Use exact origins and include the target origin")
-        if not self.success_path.startswith("/"):
+        if self.login_url is not None and origin(self.login_url) not in origins:
+            raise ValueError("login_url must be on an allowed origin")
+        if self.success_path is None and self.success_criteria is None:
+            raise ValueError("Give success_path or success_criteria")
+        if self.success_path is not None and not self.success_path.startswith("/"):
             raise ValueError("success_path must start with /")
         if len({p.id for p in self.personas}) != len(self.personas):
             raise ValueError("Persona IDs must be unique")
@@ -64,13 +77,20 @@ class RunInput(StrictModel):
 
 
 class Action(StrictModel):
-    kind: Literal["click", "fill", "scroll", "hover", "select", "check", "uncheck", "press", "wait", "back", "forward", "reload", "stop"]
+    # done: 목표를 이뤘다고 본다는 뜻. 성공으로 바로 치지 않고 판정 모델이 따로 확인한다 (success_criteria 일 때)
+    kind: Literal["click", "fill", "scroll", "hover", "select", "check", "uncheck", "press", "wait", "back", "forward", "reload", "stop", "done"]
     target_id: str | None
     value: str | None
     explanation: str
 
 
 Terminal = Literal["success", "simulated_dropout", "agent_failure", "site_failure", "blocked_auth", "budget_exceeded", "cancelled"]
+
+
+class Judgment(StrictModel):
+    """성공 기준 판정 결과. achieved 는 화면에 근거가 보일 때만 true."""
+    achieved: bool
+    reason: str
 
 
 class SessionResult(StrictModel):
@@ -85,7 +105,11 @@ class SessionResult(StrictModel):
     model_calls: int
     input_tokens: int
     output_tokens: int
+    # 모델별 호출·토큰 (Claude 혼합처럼 한 세션에서 모델을 둘 이상 쓸 때 비용 계산용). 단일 모델 정책은 비어 있다
+    usage_by_model: dict[str, dict[str, int]] = Field(default_factory=dict)
+    judgments: int = 0                                         # 성공 기준 판정 횟수
     issues: list[dict]
     final_artifact: str | None
     terminal_stage: str | None = None                          # 마지막으로 본 화면의 퍼널 단계
     stages_reached: list[str] = Field(default_factory=list)    # 처음 도달한 순서대로
+    blocked_writes: int = 0                                    # read_only 로 막은 쓰기 요청 수

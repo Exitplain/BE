@@ -190,6 +190,7 @@ class Observation(models.Model):
     step = models.PositiveIntegerField()  # step_id "step_003" 의 숫자
     step_id = models.CharField(max_length=20)
     url = models.CharField(max_length=1000)
+    title = models.CharField(max_length=200, blank=True, default="")  # 화면 제목. 실행 퍼널의 단계 이름에 쓴다
     artifact = models.CharField(max_length=500, blank=True, default="")  # ARTIFACT_ROOT 기준 상대경로
     required_fields = models.PositiveSmallIntegerField(default=0)
     text = models.TextField(blank=True, default="")  # think-aloud 에 쓰는 화면 텍스트

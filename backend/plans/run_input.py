@@ -16,7 +16,7 @@ RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 UNSUPPORTED_FIELDS = (
     "tasks[].funnel (에이전트가 화면 경로로 7단계를 자동 결정)",
     "limits.cost_cap (에이전트에는 금액이 아니라 토큰 상한만 있음)",
-        "test_accounts (에이전트 로그인 기능이 생기면 testaccounts.services.credentials_for_snapshot으로 넘김)",
+        "test_accounts (계정 값은 입력에 넣지 않고 워커가 환경변수 DROPSPOT_CREDENTIALS 로만 넘김)",
 )
 MOBILE_MAX_WIDTH = 480
 VIEWPORT_HEIGHT = {"mobile": 844, "desktop": 800}
@@ -35,6 +35,14 @@ def _entry_url(entry_url, variant, case):
     query = dict(parse_qsl(parts.query))
     query.update({"variant": variant, "case": case})
     return urlunsplit(parts._replace(path=parts.path or "/", query=urlencode(query)))
+
+
+def _target_url(site, task):
+    """데모 과업은 ?variant=&case=, 사이트 확인(explore)으로 만든 과업은 사이트 출처 + 과업의 시작 화면."""
+    if task.get("start_path"):
+        parts = urlsplit(site["entry_url"])
+        return urlunsplit((parts.scheme, parts.netloc, task["start_path"], "", ""))
+    return _entry_url(site["entry_url"], site["variant"], task["case"])
 
 
 VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
@@ -72,10 +80,11 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
     payload = {
         "schema_version": "1.0",
         "run_id": f"{run_id}_{task_id}_s{seed}",
-        "target_url": _entry_url(site["entry_url"], site["variant"], task["case"]),
+        "target_url": _target_url(site, task),
         "allowed_origins": site["allowed_origins"],
         "goal": task["goal"],
-        "success_path": task["success_path"],
+        "success_path": task.get("success_path"),
+        "success_criteria": task.get("success_criteria"),
         "personas": [_agent_persona(p, frustration_enabled) for p in data["personas"]],
         "max_steps": limits["max_steps"],
         "timeout_seconds": limits["timeout_seconds"],
@@ -85,6 +94,10 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         "viewport_height": VIEWPORT_HEIGHT["mobile" if width <= MOBILE_MAX_WIDTH else "desktop"],
         "action_interval_seconds": min(float(limits["request_interval_seconds"]), 5.0),
     }
+    accounts = data.get("test_accounts")
+    if accounts:
+        # 계정 값은 넣지 않는다 (입력 파일로 남음). 워커가 실행할 때 환경변수로만 넘긴다 (runs/worker.py)
+        payload.update(login_url=accounts["login_url"] or None, read_only=True)
     try:
         return RunInput.model_validate(payload).model_dump(mode="json")
     except Exception as exc:  # pydantic ValidationError

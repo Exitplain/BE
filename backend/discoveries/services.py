@@ -21,6 +21,15 @@ def run_discovery(variant):
     return asyncio.run(discover_site(variant))
 
 
+def run_exploration(entry_url, allowed_origins, login=None):
+    """처음 보는 URL을 읽기 전용으로 둘러보고 기능·과업 후보를 받는다 (agent/explore.py). 테스트에서는 mock한다.
+
+    login: {"url", "username", "password"} 이면 그 계정으로 로그인한 상태로 둘러본다.
+    """
+    from agent.explore import discover_url
+    return asyncio.run(discover_url(entry_url, list(allowed_origins), login=login))
+
+
 def _origin(url):
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}"
@@ -42,18 +51,40 @@ def create_discovery(user, project, data):
         from testaccounts.services import ensure_ready
         ensure_ready(project)
 
+    explore = getattr(settings, "EXITPLAIN_DISCOVERY_MODE", "demo") == "explore"
+    account = None
+    if explore and data["login_mode"] == Discovery.LoginMode.TEST_ACCOUNT:
+        from testaccounts.services import credentials_for_discovery
+        account = credentials_for_discovery(project)
+        if account is None:
+            raise ApiError(422, "LOGIN_URL_REQUIRED", "테스트 계정의 로그인 화면 주소를 먼저 등록해주세요.",
+                           {"login_url": ["로그인 화면 주소가 없습니다."]})
+
     started = time.monotonic()
     try:
-        result = run_discovery(data["variant"])
+        if explore:
+            login = {k: account[k] for k in ("url", "username", "password")} if account else None
+            result = run_exploration(entry_url, target["allowed_origins"], login=login)
+        else:
+            result = run_discovery(data["variant"])
+    except ValueError as exc:
+        if account and "로그인" in str(exc):
+            from testaccounts.services import record_check
+            record_check(account["account_id"], False, "사이트 확인 중 로그인 실패")
+            raise ApiError(409, "TEST_ACCOUNT_LOGIN_FAILED", "테스트 계정으로 로그인하지 못했습니다. 계정과 로그인 화면 주소를 확인해주세요.") from exc
+        raise ApiError(503, "SITE_UNREACHABLE", "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요.") from exc
     except Exception as exc:
         raise ApiError(503, "SITE_UNREACHABLE", "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요.") from exc
+    if account:
+        from testaccounts.services import record_check
+        record_check(account["account_id"], True, "사이트 확인 중 로그인 성공")
     if not result.get("features"):
         raise ApiError(422, "NO_FEATURES_FOUND", "시작 화면에서 확인할 수 있는 기능을 찾지 못했습니다.")
 
     now = timezone.now()
     return Discovery.objects.create(
         project=project, created_by=user, entry_url=entry_url, login_mode=data["login_mode"],
-        variant=data["variant"], features=result["features"], tasks=result.get("tasks", []),
+        variant="explore" if explore else data["variant"], features=result["features"], tasks=result.get("tasks", []),
         note=(result.get("note") or "")[:300], elapsed_seconds=round(time.monotonic() - started, 2),
         expires_at=now + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS),
     )

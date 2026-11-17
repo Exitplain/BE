@@ -67,10 +67,11 @@ def load_attempt(attempt_dir):
             persona_id = (payload.get("persona") or {}).get("id") or sid.removeprefix("session_")
             sessions[sid] = {"task_id": task_id, "seed": seed, "persona_id": persona_id,
                              "status": "incomplete", "reason": "종료 이벤트 없음", "steps": 0,
-                             "duration_seconds": None, "stages": [], "causes": [], "primary_cause": None}
+                             "duration_seconds": None, "stages": [], "screens": [], "causes": [], "primary_cause": None}
         elif sid in sessions and event.get("type") == "observation.created":
             stage = payload.get("stage") or funnel_stage(payload.get("url", "/"), success_path, stage_paths)
             sessions[sid]["stages"].append(stage)
+            sessions[sid]["screens"].append({"url": payload.get("url", "/"), "title": payload.get("title") or ""})
         elif sid in sessions and event.get("type") == "session.finished":
             issues = payload.get("issues") or []
             sessions[sid].update(status=payload.get("status", "incomplete"), reason=payload.get("reason", ""),
@@ -105,14 +106,15 @@ def load_from_db(run):
     for s in sessions:
         task_input = s.task_run.input_json or {}
         success_path, stage_paths = task_input.get("success_path"), task_input.get("stage_paths") or {}
-        stages = [o.stage or funnel_stage(o.url, success_path, stage_paths)
-                  for o in sorted(s.observations.all(), key=lambda o: o.step)]
+        observations = sorted(s.observations.all(), key=lambda o: o.step)
+        stages = [o.stage or funnel_stage(o.url, success_path, stage_paths) for o in observations]
         issues = s.issues or []
         records.append({
             "task_id": s.task_id, "seed": s.seed, "persona_id": s.persona_snapshot.code,
             "status": s.status if s.is_terminal else "incomplete",
             "reason": s.reason, "steps": s.steps, "duration_seconds": s.duration_seconds,
             "stages": stages,
+            "screens": [{"url": o.url, "title": o.title} for o in observations],
             "causes": [i.get("category") for i in issues if isinstance(i, dict) and i.get("category")],
             "primary_cause": _primary([i for i in issues if isinstance(i, dict)]),
         })

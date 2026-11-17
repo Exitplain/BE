@@ -153,8 +153,15 @@ class Worker:
             command += ["--model", settings.AGENT_MODEL]
         log = open(logs_dir / f"{task_run.agent_run_id}.log", "ab")
         popen_args = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        env = None
+        if (task_run.run.plan_snapshot.data or {}).get("test_accounts"):
+            # 테스트 계정: 입력 파일·로그가 아니라 에이전트 프로세스 환경변수로만 넘긴다 (agent/cli.py 가 읽고 지움)
+            from testaccounts.services import credentials_for_snapshot
+            accounts = credentials_for_snapshot(task_run.run.plan_snapshot, run_id=str(task_run.run_id))
+            env = {**os.environ, "DROPSPOT_CREDENTIALS": json.dumps(
+                {a["persona_code"]: {"username": a["username"], "password": a["password"]} for a in accounts})}
         try:
-            proc = subprocess.Popen(command, cwd=repo_root(), stdout=log, stderr=subprocess.STDOUT, **popen_args)
+            proc = subprocess.Popen(command, cwd=repo_root(), stdout=log, stderr=subprocess.STDOUT, env=env, **popen_args)
         except OSError as exc:
             log.close()
             importer.finalize_task_run(task_run, error_code="SPAWN_FAILED", error_message=f"에이전트를 시작하지 못했습니다: {exc}")

@@ -218,8 +218,12 @@ else:
 EXITPLAIN_PROJECT_MODEL = 'projects.Project'
 # 사이트 확인(탐색) 결과 유효 시간(초). docs/API_SPEC.md 4.1의 15분과 같음
 EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
+# 사이트 확인 방식. demo(기본): 로컬 데모 쇼핑몰의 정해진 기능·과업. explore: 입력한 URL을 읽기 전용으로 둘러보고
+# 기능·과업을 모델이 제안한다 (agent/explore.py, ANTHROPIC_API_KEY 필요, 과업은 말로 쓴 성공 기준을 쓴다)
+EXITPLAIN_DISCOVERY_MODE = os.environ.get('EXITPLAIN_DISCOVERY_MODE', 'demo')
 # 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
-EXITPLAIN_PERSONA_GENERATOR = None
+# 비우면 규칙 기반(rules-v1). LLM 생성기: personas.llm.generate (ANTHROPIC_API_KEY 필요, 모델은 EXITPLAIN_PERSONA_MODEL)
+EXITPLAIN_PERSONA_GENERATOR = os.environ.get('EXITPLAIN_PERSONA_GENERATOR') or None
 # 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
 EXITPLAIN_APPEND_DEMO_QUERY = True
 # 에이전트 실행 결과 폴더 (agent.execute_run의 output_dir). 세션 상세가 여기서 events.jsonl을 읽는다
@@ -249,6 +253,7 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
+# claude 는 ANTHROPIC_API_KEY 가 필요하다. AGENT_MODEL 을 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5 (agent/policies.py ClaudePolicy)
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
 
 # 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음

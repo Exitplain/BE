@@ -57,6 +57,11 @@ class RunReportTests(WizardMixin, TestCase):
         self.assertEqual(order["top_causes"][0]["name"], "입력 부담")
         funnel = {s["key"]: s["reached"] for s in order["funnel"]}
         self.assertEqual((funnel["landing"], funnel["browse"], funnel["detail"]), (20, 20, 20))
+        # 실행 퍼널: DB에 저장된 화면 주소·제목으로 만든다 (가짜 에이전트는 '/' → '/product' → '/cart')
+        journey = order["journey_funnel"]["stages"]
+        self.assertEqual([(s["id"], s["name"], s["reached"]) for s in journey],
+                         [("/", "반찬로드", 20), ("/product", "이번 주 식탁", 20), ("/cart", "장바구니", 20)])
+        self.assertEqual(journey[-1]["dropouts_here"], 10)
         self.assertEqual(len(data["sessions"]), 40)
         # A의 실행 목록이 run_ref로 이 리포트를 찾는다
         self.assertEqual(latest_report_summaries([run.id])[str(run.id)]["id"], str(report.id))

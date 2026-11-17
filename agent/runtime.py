@@ -8,7 +8,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
 from .behavior import PersonaMeter
-from .browser import observe, act, origin
+from .browser import observe, act, origin, login
 from .funnel import funnel_stage
 from .schemas import RunInput, SessionResult
 
@@ -24,12 +24,21 @@ ISSUE_SUMMARIES = {
 }
 
 
-async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None):
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_CONSECUTIVE_FAILURES = 3     # 행동이 연달아 이만큼 실패하면 기술 실패로 끝낸다
+
+
+async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", emit_event=None, should_cancel=None,
+                      credentials=None, judge=None):
     """Call from a Django worker's async boundary; callbacks may be sync or async.
 
     Only trusted test sites are supported. Exact-origin routing is not an SSRF firewall.
     Each invocation creates a unique attempt directory; no existing evidence is overwritten.
+    credentials: {persona_id: {"username", "password"}} for config.login_url. Kept in memory only, never written.
+    judge: success_criteria 판정기 (agent/judge.py). 정책이 done 을 고르면 화면을 따로 판정한다.
     """
+    if config.success_criteria and judge is None:
+        raise ValueError("success_criteria needs a judge")
     attempt = uuid4().hex
     root = Path(output_dir) / config.run_id / attempt
     root.mkdir(parents=True, exist_ok=False)
@@ -66,14 +75,19 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     folder.mkdir()
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
-                             "calls": 0, "input": 0, "output": 0, "issues": [], "artifact": None}
+                             "calls": 0, "input": 0, "output": 0, "by_model": {}, "issues": [], "artifact": None,
+                             "judgments": 0, "blocked_writes": 0}
                     context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
                                                         service_workers="block")
                     policy = None
                     blocked = []
+                    logging_in = [config.login_url is not None]   # 로그인 요청(POST)은 read_only 여도 보낸다
                     async def guard(route):
                         if origin(route.request.url) not in config.allowed_origins:
                             blocked.append(route.request.url)
+                            await route.abort()
+                        elif config.read_only and not logging_in[0] and route.request.method not in SAFE_METHODS:
+                            state["blocked_writes"] += 1      # 운영 자료가 바뀌지 않게 쓰기 요청만 막는다
                             await route.abort()
                         else:
                             await route.continue_()
@@ -83,6 +97,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     page = await context.new_page()
                     page.set_default_timeout(5000)
                     history = []
+                    failures = [0]                    # 연속으로 실패한 행동 수
                     seen_signals = set()
                     meter = PersonaMeter(persona, config.seed)
                     last_action = None
@@ -95,6 +110,25 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         state["artifact"] = str(path)
                         return str(path)
 
+                    judged_screens = set()
+
+                    async def judge_screen(obs, step_id, trigger):
+                        """지금 화면을 성공 기준으로 판정한다. 판정 수 한도를 넘으면 None (판정 안 함)."""
+                        if state["judgments"] >= config.max_judgments_per_session:
+                            return None
+                        state["judgments"] += 1
+                        verdict, used = await judge.judge(config.success_criteria, config.goal, obs)
+                        for model_id, u in used.items():
+                            total = state["by_model"].setdefault(model_id, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+                            for key in total:
+                                total[key] += u.get(key, 0)
+                            state["calls"] += u.get("calls", 0)
+                            state["input"] += u.get("input_tokens", 0)
+                            state["output"] += u.get("output_tokens", 0)
+                        await emit("success.judged", sid, {"step_id": step_id, "achieved": verdict.achieved, "trigger": trigger,
+                                                           "reason": verdict.reason, "model": getattr(judge, "model", None)})
+                        return verdict
+
                     async def body():
                         nonlocal policy, last_action, stage, wait_seconds
                         await emit("session.started", sid, {"persona": persona.model_dump()})
@@ -102,6 +136,20 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             state.update(status="cancelled", reason="Cancellation requested")
                             return
                         policy = policy_factory()
+                        if config.login_url:
+                            account = (credentials or {}).get(persona.id)
+                            ok = False
+                            if account:
+                                try:
+                                    ok = await login(page, config.login_url, account["username"], account["password"])
+                                except Exception:
+                                    ok = False            # 예외 문구에 입력값이 섞이지 않게 내용은 버린다
+                            logging_in[0] = False
+                            await emit("login.completed", sid, {"ok": ok, "has_account": bool(account)})
+                            if not ok:
+                                state.update(status="blocked_auth",
+                                             reason="Test account login failed" if account else "No test account for persona")
+                                return
                         response = await page.goto(config.target_url, wait_until="domcontentloaded", timeout=15000)
                         if response and response.status >= 400:
                             state.update(status="site_failure", reason=f"HTTP {response.status}")
@@ -124,13 +172,25 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             point = meter.observe(stage, obs["required_fields"], obs["text"],
                                                   obs.get("cost_warning_boxes", []), last_action, obs["elements"],
                                                   config.viewport_width, wait_seconds)
-                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"], "stage": stage,
+                            await emit("observation.created", sid, {"step_id": step_id, "url": obs["url"],
+                                "title": (obs.get("title") or "")[:200], "stage": stage,
                                 "artifact": artifact, "required_fields": obs["required_fields"], "text": obs["text"],
                                 "frustration_score": point["score"], "frustration_threshold": point["threshold"]})
                             # Independent environment predicate; model's completion claim is ignored.
-                            if urlsplit(page.url).path == config.success_path:
+                            if config.success_path and urlsplit(page.url).path == config.success_path:
                                 state.update(status="success", reason="Configured success path observed")
                                 return
+                            # 새 화면에 들어서면 정책의 done 을 기다리지 않고 판정한다 (목표 화면에 와서도 계속 진행하는 경우).
+                            # 시작 화면은 건너뛴다. 판정 수는 max_judgments_per_session 안에서만.
+                            screen = urlsplit(page.url).path
+                            if not step:
+                                judged_screens.add(screen)          # 시작 화면
+                            elif config.success_criteria and screen not in judged_screens:
+                                judged_screens.add(screen)
+                                verdict = await judge_screen(obs, step_id, "new_screen")
+                                if verdict is not None and verdict.achieved:
+                                    state.update(status="success", reason="Success criteria judged achieved on screen")
+                                    return
                             for category in point["signals"]:
                                 if category in seen_signals:
                                     continue          # 같은 원인은 처음 한 번만 issue로 남김
@@ -151,6 +211,12 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 return
                             state["calls"] += int(getattr(policy, "name", "") != "scripted_fixture")
                             action, usage = await policy.decide(obs, persona, config.goal, history)
+                            if usage.get("by_model"):        # 한 스텝에 모델을 여러 번 부르는 정책 (Claude 혼합)
+                                for model_id, used in usage["by_model"].items():
+                                    total = state["by_model"].setdefault(model_id, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+                                    for key in total:
+                                        total[key] += used.get(key, 0)
+                                state["calls"] += sum(used.get("calls", 0) for used in usage["by_model"].values()) - 1
                             state["input"] += usage.get("input_tokens", 0)
                             state["output"] += usage.get("output_tokens", 0)
                             if config.max_tokens_per_session and state["input"] + state["output"] >= config.max_tokens_per_session:
@@ -159,8 +225,41 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                             if action.kind == "stop":
                                 state.update(status="agent_failure", reason="Policy stopped without verified completion")
                                 return
+                            if action.kind == "done":
+                                # 정책의 '다 했다'는 주장은 성공이 아니다. 성공 기준이 있으면 별도 판정 모델이 지금 화면으로 확인한다.
+                                if not config.success_criteria:
+                                    note = "not verified: success is checked by the configured success path only"
+                                else:
+                                    verdict = await judge_screen(obs, step_id, "done")
+                                    if verdict is None:
+                                        note = "not verified: judgment limit reached for this session"
+                                    elif verdict.achieved:
+                                        state.update(status="success", reason="Success criteria judged achieved on screen")
+                                        return
+                                    else:
+                                        note = f"not achieved yet: {verdict.reason}"
+                                history.append({**action.model_dump(), "result": note})
+                                last_action = "done"
+                                continue
                             acted = time.monotonic()
-                            await act(page, action, obs)
+                            try:
+                                await act(page, action, obs)
+                            except Exception as exc:
+                                # 처음 보는 사이트에서는 누를 수 없는 요소를 고를 수 있다. 세션을 바로 끝내지 않고
+                                # 실패를 행동 기록에 남겨 다음 스텝에서 정책이 다른 방법을 고르게 한다.
+                                # (예외 문구는 화면·입력값이 섞일 수 있어 종류만 남긴다)
+                                failures[0] += 1
+                                await emit("action.failed", sid, {"step_id": step_id, "action": action.model_dump(),
+                                                                  "error": type(exc).__name__})
+                                history.append({**action.model_dump(), "result": f"failed ({type(exc).__name__}): "
+                                                "this action could not be performed on the current screen"})
+                                last_action = "failed"
+                                if failures[0] >= MAX_CONSECUTIVE_FAILURES:
+                                    state.update(status="agent_failure",
+                                                 reason=f"{MAX_CONSECUTIVE_FAILURES} actions failed in a row")
+                                    return
+                                continue
+                            failures[0] = 0
                             history.append(action.model_dump())
                             last_action = action.kind
                             await emit("action.completed", sid, {"step_id": step_id, "action": action.model_dump()})
@@ -172,7 +271,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 await asyncio.sleep(config.action_interval_seconds)   # 요청 간격
                         # Verify completion even when the final permitted action succeeded.
                         await capture("final.png")
-                        if urlsplit(page.url).path == config.success_path:
+                        if config.success_path and urlsplit(page.url).path == config.success_path:
                             state.update(status="success", reason="Success path observed after final action")
 
                     try:
@@ -196,9 +295,10 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         policy=getattr(policy, "name", "custom_or_uninitialized"), model_id=getattr(policy, "model", None),
                         status=state["status"], reason=state["reason"], steps=state["steps"],
                         duration_seconds=round(time.monotonic()-started, 3), model_calls=state["calls"],
-                        input_tokens=state["input"], output_tokens=state["output"],
+                        input_tokens=state["input"], output_tokens=state["output"], usage_by_model=state["by_model"],
+                        judgments=state["judgments"],
                         issues=state["issues"], final_artifact=state["artifact"],
-                        terminal_stage=stage, stages_reached=list(meter.stages))
+                        terminal_stage=stage, stages_reached=list(meter.stages), blocked_writes=state["blocked_writes"])
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
                     await emit("session.finished", sid, result.model_dump())
                     return result

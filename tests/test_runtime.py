@@ -54,6 +54,45 @@ async def test_invalid_target_is_failure_not_dropout(tmp_path):
     assert all(s["status"] == "agent_failure" for s in report["sessions"])
 
 
+async def test_usage_by_model_is_summed_per_session(tmp_path):
+    """한 스텝에 모델을 둘 부르는 정책(Claude 혼합)의 모델별 호출·토큰이 세션 결과에 합산된다."""
+    class TwoModelPolicy(ScriptedPolicy):
+        name = "claude"
+        model = "base-model"
+        async def decide(self, *args):
+            action, _ = await super().decide(*args)
+            by_model = {"base-model": {"calls": 1, "input_tokens": 10, "output_tokens": 1},
+                        "upper-model": {"calls": 1, "input_tokens": 20, "output_tokens": 2}}
+            return action, {"input_tokens": 30, "output_tokens": 3, "by_model": by_model}
+    with demo_server() as base:
+        report = await execute_run(config(base), TwoModelPolicy, tmp_path)
+    for session in report["sessions"]:
+        steps = session["usage_by_model"]["base-model"]["calls"]
+        assert session["status"] == "success" and steps >= 1
+        assert session["model_calls"] == 2 * steps
+        assert session["usage_by_model"]["upper-model"] == {"calls": steps, "input_tokens": 20 * steps, "output_tokens": 2 * steps}
+        assert (session["input_tokens"], session["output_tokens"]) == (30 * steps, 3 * steps)
+
+
+async def test_failed_action_is_fed_back_and_the_session_recovers(tmp_path):
+    """처음 보는 사이트에서 누를 수 없는 요소를 골라도 세션을 끝내지 않고, 실패를 기록에 담아 다시 고르게 한다."""
+    seen = []
+
+    class RecoveringPolicy(ScriptedPolicy):
+        async def decide(self, observation, persona, goal, history):
+            seen.append([h.get("result") for h in history])
+            if not history:
+                return Action(kind="click", target_id="nonexistent", value=None, explanation="잘못 고름"), {}
+            return await super().decide(observation, persona, goal, history)
+
+    events = []
+    with demo_server() as base:
+        report = await execute_run(config(base), RecoveringPolicy, tmp_path, events.append)
+    assert all(s["status"] == "success" for s in report["sessions"])
+    assert any(r and r[0] and r[0].startswith("failed") for r in seen)          # 다음 결정 때 실패를 봤다
+    assert sum(e["type"] == "action.failed" for e in events) == 2               # 페르소나 2명 × 1번
+
+
 async def test_cancellation_and_time_budget(tmp_path):
     class SlowPolicy:
         async def decide(self, *args):
