@@ -20,6 +20,7 @@ class Discovery(models.Model):
     variant = models.CharField(max_length=16)          # 데모 쇼핑몰 버전 fixed/problem
     features = models.JSONField(default=list)          # [{id, name, evidence, verification}]
     tasks = models.JSONField(default=list)             # [{id, name, goal, case, success_path, feature_id, suggested}]
+    screen_names = models.JSONField(default=dict, blank=True)   # 사이트 확인(explore)이 붙인 화면 역할 이름 {정규화 경로: 이름}
     note = models.CharField(max_length=300, blank=True, default="")
     elapsed_seconds = models.FloatField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)

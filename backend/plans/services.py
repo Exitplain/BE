@@ -247,6 +247,7 @@ def confirm_plan(plan_id, revision, user):
                  "allowed_origins": project_target(plan.project)["allowed_origins"],
                  "discovery_id": str(plan.discovery_id)},
         "features": plan.discovery.features,
+        "screen_names": dict(plan.discovery.screen_names or {}),   # 화면 역할 이름 (리포트·세션 표시용, 에이전트에는 안 넘김)
         "tasks": [{**tasks[t], "funnel": funnels[t]} for t in plan.task_ids],
         "not_in_run": {"custom_tasks": plan.custom_tasks, "additional_request": plan.additional_request},
         "audience": {"context": plan.audience_context, "ages": plan.ages, "age_labels": _age_labels(plan.ages),

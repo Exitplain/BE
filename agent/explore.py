@@ -173,10 +173,16 @@ class TaskDraft(BaseModel):
     suggested: bool
 
 
+class ScreenRole(BaseModel):
+    path: str
+    name: str = Field(max_length=40)
+
+
 class Proposal(BaseModel):
     site_name: str = Field(max_length=60)
     features: list[FeatureDraft]
     tasks: list[TaskDraft]
+    screens: list[ScreenRole] = Field(default_factory=list)   # 둘러본 화면마다 역할 이름 (리포트·세션 표시용)
 
 
 INSTRUCTIONS = (
@@ -194,7 +200,9 @@ INSTRUCTIONS = (
     "already satisfies its success_criteria. Never require entering real "
     "personal data, payment, or destructive actions. If logged_in is true, the snapshots were taken while signed "
     "in with a test account: propose tasks a signed-in user would do there, and do not propose login or signup "
-    "tasks. ids are lowercase ascii words joined by hyphens.")
+    "tasks. ids are lowercase ascii words joined by hyphens. Also give every snapshot page a short Korean role "
+    "name in screens (path exactly as in the snapshot, name at most 12 characters, for example 홈, 상품 상세, "
+    "장바구니, 로그인, 회원가입, 배송 정보 입력, 주문 완료, 공부방), each page a different name.")
 
 
 def _check(proposal, paths):
@@ -245,6 +253,12 @@ async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, ma
     if not pages:
         raise ValueError("시작 화면을 열지 못했습니다.")
     proposal = await asyncio.to_thread(propose, pages, entry_url, client, bool(login))
+    crawled = {p["path"] for p in pages}
+    screen_names = {}
+    for s in proposal.screens:                     # 역할 이름은 표시용이라 이상한 항목만 버리고 탐색은 실패시키지 않는다
+        name = s.name.strip()
+        if s.path in crawled and 0 < len(name) <= 20 and s.path not in screen_names and name not in screen_names.values():
+            screen_names[s.path] = name
     features = [{"id": f.id, "name": f.name, "evidence": {"label": f.evidence_label, "path": f.evidence_path},
                  "verification": "explored_readonly"} for f in proposal.features]
     tasks = [{"id": t.id, "name": t.name, "goal": t.goal, "success_criteria": t.success_criteria, "success_path": None,
@@ -254,5 +268,5 @@ async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, ma
     who = "테스트 계정으로 로그인해 " if login else ""
     note = (f"{who}화면 {len(pages)}개를 읽기 전용으로 둘러봤습니다 (쓰기 요청 {blocked['writes']}건 차단). "
             "기능·과업은 모델이 제안한 가설입니다.")
-    return {"project": proposal.site_name, "features": features, "tasks": tasks, "note": note,
+    return {"project": proposal.site_name, "features": features, "tasks": tasks, "note": note, "screen_names": screen_names,
             "explored": [{"path": p["path"], "title": p["title"], "depth": p["depth"]} for p in pages]}

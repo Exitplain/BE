@@ -74,33 +74,44 @@ def _ask(client, goal, stages, texts):
     return named
 
 
-def apply_role_names(data, project_id=None, client=None):
-    """리포트 data 의 과업별 실행 퍼널 단계에 역할 이름을 붙이고, 이름 붙이기용 화면 글자는 지운다."""
+def known_names(project_id=None, snapshot_names=None):
+    """이미 정해진 화면 역할 이름 {경로: 이름}. 프로젝트의 이전 리포트 이름이 먼저(실행끼리 이름 고정),
+    없는 경로는 사이트 확인이 붙인 이름(계획 스냅샷)으로 채운다."""
+    names = previous_names(project_id) if project_id is not None else {}
+    for path, name in (snapshot_names or {}).items():
+        names.setdefault(path, name)
+    return names
+
+
+def apply_role_names(data, project_id=None, client=None, snapshot_names=None):
+    """리포트 data 의 과업별 실행 퍼널 단계에 역할 이름을 붙이고, 이름 붙이기용 화면 글자는 지운다.
+
+    이미 정해진 이름(known_names)은 모델 없이도 쓴다. 모르는 경로가 있을 때만 모델에 묻는다."""
     tasks = data.get("tasks", [])
     try:
-        if client is None and not _enabled():
-            return
-        known = previous_names(project_id) if project_id is not None else {}
-        if client is None:
+        known = known_names(project_id, snapshot_names)
+        if client is None and _enabled():
             from anthropic import Anthropic
             client = Anthropic(timeout=30, max_retries=1)
+        if client is None and not known:
+            return
         for task in tasks:
             journey = task.get("journey_funnel") or {}
             stages = journey.get("stages") or []
             if not stages:
                 continue
             names = dict(known)
-            if any(s["path"] not in known for s in stages):
+            if client is not None and any(s["path"] not in known for s in stages):
                 try:
                     asked = _ask(client, task.get("name") or task.get("task_id"), stages, journey.get("_screen_texts") or {})
                 except (ValidationError, Exception) as exc:   # 이름 붙이기는 리포트를 막지 않는다
                     logger.warning("stage naming failed: %s", type(exc).__name__)
                     asked = {}
                 names.update({p: n for p, n in asked.items() if p not in known})
-            chosen = [names.get(s["path"]) for s in stages]
-            if None in chosen or len(set(chosen)) != len(chosen):
-                continue                                    # 이름이 빠졌거나 겹치면 이 과업은 제목·경로 이름 그대로
-            for stage in stages:
+            chosen = [names[s["path"]] for s in stages if s["path"] in names]
+            if len(set(chosen)) != len(chosen):
+                continue                                    # 이름이 겹치면 이 과업은 제목·경로 이름 그대로
+            for stage in stages:                            # 모르는 경로는 제목·경로 이름 그대로 둔다
                 if stage["path"] in names:
                     stage["name"], stage["name_source"] = names[stage["path"]], "model"
             known.update({s["path"]: s["name"] for s in stages if s.get("name_source") == "model"})

@@ -30,6 +30,16 @@ def run_exploration(entry_url, allowed_origins, login=None):
     return asyncio.run(discover_url(entry_url, list(allowed_origins), login=login))
 
 
+def _screen_names(names):
+    """사이트 확인이 붙인 화면 역할 이름을 실행 퍼널과 같은 단계 ID(정규화 경로)로 맞춘다."""
+    from reports.journey import screen_id
+    result = {}
+    for path, name in (names or {}).items():
+        if isinstance(path, str) and isinstance(name, str) and name.strip():
+            result.setdefault(screen_id(path), name.strip()[:20])
+    return result
+
+
 def _origin(url):
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}"
@@ -84,6 +94,7 @@ def create_discovery(user, project, data):
     now = timezone.now()
     return Discovery.objects.create(
         project=project, created_by=user, entry_url=entry_url, login_mode=data["login_mode"],
+        screen_names=_screen_names(result.get("screen_names")),
         variant="explore" if explore else data["variant"], features=result["features"], tasks=result.get("tasks", []),
         note=(result.get("note") or "")[:300], elapsed_seconds=round(time.monotonic() - started, 2),
         expires_at=now + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS),

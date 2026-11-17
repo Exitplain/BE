@@ -83,7 +83,7 @@ def load_session_from_db(run, task_id, seed, persona_id):
     timeline, by_id = [], {}
     for o in session.observations.order_by("step"):
         stage = o.stage or funnel_stage(o.url, success_path, stage_paths)
-        step = {"step_id": o.step_id, "index": len(timeline), "url": o.url, "stage": stage,
+        step = {"step_id": o.step_id, "index": len(timeline), "url": o.url, "title": o.title, "stage": stage,
                 "stage_name": stage_name(stage), "frustration_score": o.frustration_score,
                 "frustration_threshold": o.frustration_threshold, "required_fields": o.required_fields,
                 "screenshot": f"/api/v1/observations/{o.id}/screenshot" if o.artifact else None,   # A의 서빙 API
@@ -129,6 +129,7 @@ def load_session(attempt_dir, persona_id):
         if kind == "observation.created":
             stage = payload.get("stage") or funnel_stage(payload.get("url", "/"), success_path, stage_paths)
             step = {"step_id": payload.get("step_id"), "index": len(steps), "url": payload.get("url"),
+                    "title": payload.get("title") or "",
                     "stage": stage, "stage_name": stage_name(stage),
                     "frustration_score": payload.get("frustration_score"),
                     "frustration_threshold": payload.get("frustration_threshold"),
