@@ -14,4 +14,6 @@ urlpatterns = [
     path("share-links/<uuid:link_id>", views.ShareLinkDetailView.as_view(), name="share-link-detail"),
     path("shared/<slug:token>", views.SharedReportView.as_view(), name="shared-report"),
     path("projects/<int:project_id>/dashboard", views.ProjectDashboardView.as_view(), name="project-dashboard"),
+    path("projects/<int:project_id>/issues", views.ProjectIssuesView.as_view(), name="project-issues"),
+    path("issues", views.IssuesView.as_view(), name="issues"),
 ]
