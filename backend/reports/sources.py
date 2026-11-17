@@ -71,7 +71,8 @@ def load_attempt(attempt_dir):
         elif sid in sessions and event.get("type") == "observation.created":
             stage = payload.get("stage") or funnel_stage(payload.get("url", "/"), success_path, stage_paths)
             sessions[sid]["stages"].append(stage)
-            sessions[sid]["screens"].append({"url": payload.get("url", "/"), "title": payload.get("title") or ""})
+            sessions[sid]["screens"].append({"url": payload.get("url", "/"), "title": payload.get("title") or "",
+                                             "text": (payload.get("text") or "")[:400]})
         elif sid in sessions and event.get("type") == "session.finished":
             issues = payload.get("issues") or []
             sessions[sid].update(status=payload.get("status", "incomplete"), reason=payload.get("reason", ""),
@@ -114,7 +115,7 @@ def load_from_db(run):
             "status": s.status if s.is_terminal else "incomplete",
             "reason": s.reason, "steps": s.steps, "duration_seconds": s.duration_seconds,
             "stages": stages,
-            "screens": [{"url": o.url, "title": o.title} for o in observations],
+            "screens": [{"url": o.url, "title": o.title, "text": (o.text or "")[:400]} for o in observations],
             "causes": [i.get("category") for i in issues if isinstance(i, dict) and i.get("category")],
             "primary_cause": _primary([i for i in issues if isinstance(i, dict)]),
         })
