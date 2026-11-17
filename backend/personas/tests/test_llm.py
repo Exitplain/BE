@@ -53,6 +53,12 @@ class GenerateTests(SimpleTestCase):
         self.assertFalse(request["age_groups_given_by_user"])
         self.assertEqual(len(request["age_groups"]), 4)
 
+    def test_korean_age_labels_are_mapped_to_ids(self):
+        """모델이 '20s' 대신 화면 이름 '20대'를 써도 같은 연령대면 받아들인다 (로컬 실행에서 실제로 나온 응답)."""
+        segments = [seg("a", "20대"), seg("b", " 20s "), seg("c", "30대"), seg("d", "30s")]
+        result = llm.generate("대학생", ["20s", "30s"], [3, 3, 2, 2], client=FakeClient(segments))
+        self.assertEqual([r["age_group"] for r in result], ["20s", "20s", "30s", "30s"])
+
     def test_invalid_drafts_are_rejected_not_fixed(self):
         cases = {
             "개를 요청했는데": FOUR[:3],                                              # 수가 다름
