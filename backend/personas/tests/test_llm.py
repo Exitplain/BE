@@ -32,6 +32,14 @@ FOUR = [seg("시험 기간 벼락치기 대학생", "20s"), seg("강의 녹음 �
         seg("퇴근 후 야간 수업 듣는 직장인", "30s", patience=25), seg("자격증 준비하는 사회초년생", "30s")]
 
 
+class AvatarTests(SimpleTestCase):
+    def test_pick_avatar(self):
+        from personas.services import pick_avatar
+        self.assertEqual(pick_avatar("40s", ["20s"], 0), "40s")                                 # 생성기 연령대 우선
+        self.assertEqual([pick_avatar(None, ["30s"], i) for i in range(3)], ["30s"] * 3)        # 고른 연령대
+        self.assertEqual([pick_avatar(None, ["any"], i) for i in range(5)], ["20s", "30s", "40s", "50plus", "20s"])
+
+
 class GenerateTests(SimpleTestCase):
     def test_age_groups_go_first_and_segments_come_back_with_situations(self):
         client = FakeClient(FOUR)
@@ -91,6 +99,9 @@ class ConfirmWithLlmTests(WizardMixin, TestCase):
         self.assertEqual(data["segments"][2]["age_group"], "30s")
         first = data["personas"][0]
         self.assertIn("시험 2주 전", first["context"])
+        # 화면 캐릭터는 세그먼트 연령대를 따른다 (표시용, 실행 입력에는 없음)
+        self.assertEqual([s["avatar"] for s in data["segments"]], ["20s", "20s", "30s", "30s"])
+        self.assertEqual(first["avatar"], "20s")
         self.assertTrue(first["context"].endswith("연령 문맥: 20대"))        # 세그먼트의 연령대 하나만
 
     def test_generation_failure_rolls_back_confirmation(self, _):
