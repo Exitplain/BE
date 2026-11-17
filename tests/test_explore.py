@@ -59,6 +59,75 @@ async def test_crawl_follows_links_and_buttons_without_writing():
     assert pricing["forms"] == [{"inputs": 2, "password": True}]
 
 
+LOGIN_PAGES = {
+    "/login": """<title>로그인</title><form method="post" action="/login"><input type="email" name="email">
+<input type="password" name="password"><button type="submit">로그인</button></form>""",
+    "/home": """<title>홈</title><h1>내 공부방</h1><a href="/notes">노트</a>
+<button onclick="document.cookie='session=; Max-Age=0; Path=/'; location.href='/login'">로그아웃</button>
+<button onclick="fetch('/api/save',{method:'POST'})">저장</button>""",
+    "/notes": "<title>노트</title><h2>내 노트</h2>",
+}
+USER, SECRET = "tester@example.test", "s3cret-PW!xyz"
+
+
+@contextmanager
+def login_site():
+    writes = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def send(self, code, body="", headers=()):
+            self.send_response(code)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(("<!doctype html>" + body).encode())
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path != "/login" and "session=ok" not in (self.headers.get("Cookie") or ""):
+                return self.send(303, headers=[("Location", "/login")])
+            self.send(200 if path in LOGIN_PAGES else 404, LOGIN_PAGES.get(path, ""))
+
+        def do_POST(self):
+            from urllib.parse import parse_qs
+            body = parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode())
+            if self.path == "/login" and body.get("email") == [USER] and body.get("password") == [SECRET]:
+                return self.send(303, headers=[("Location", "/home"), ("Set-Cookie", "session=ok; Path=/")])
+            if self.path != "/login":
+                writes.append(self.path)
+            self.send(200, LOGIN_PAGES["/login"])
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", writes
+    finally:
+        server.shutdown()
+
+
+async def test_crawl_logged_in_relogs_after_logout_and_keeps_secrets_out():
+    with login_site() as (base, writes):
+        login = {"url": base + "/login", "username": USER, "password": SECRET}
+        pages, blocked = await crawl(base + "/", [base], login=login)
+    paths = [p["path"] for p in pages]
+    assert paths[0] == "/home" and "/notes" in paths and "/login" not in paths      # 로그인 뒤 첫 화면부터
+    assert blocked["relogins"] >= 1                                                  # 로그아웃 버튼 뒤 다시 로그인
+    home = pages[0]
+    assert all(l["label"] != "로그아웃" for l in home["links"])                      # 로그아웃 길은 적지 않음
+    assert writes == [] and blocked["writes"] >= 1
+    assert SECRET not in str(pages) and USER not in str(pages)
+
+
+async def test_crawl_with_wrong_password_fails_clearly():
+    with login_site() as (base, _):
+        with pytest.raises(ValueError, match="로그인하지 못했습니다"):
+            await crawl(base + "/", [base], login={"url": base + "/login", "username": USER, "password": "wrong"})
+
+
 def proposal(**overrides):
     base = dict(site_name="공부 도우미",
                 features=[FeatureDraft(id="notes", name="노트", evidence_path="/notes", evidence_label="노트")],

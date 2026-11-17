@@ -138,6 +138,19 @@ def _on_session_finished(session, payload, when):
     session.save()
 
 
+def _on_login(batch, session, payload):
+    """에이전트의 테스트 계정 로그인 결과 → 계정 상태(P04c). 페르소나 코드로 계획 확정 때 짝지은 계정을 찾는다."""
+    if session is None:
+        return
+    pairs = ((batch.run.plan_snapshot.data or {}).get("test_accounts") or {}).get("pairs") or []
+    code = session.persona_snapshot.code
+    account_id = next((p["account_id"] for p in pairs if p["persona_code"] == code), None)
+    if account_id:
+        from testaccounts.services import record_check
+        ok = bool(payload.get("ok"))
+        record_check(account_id, ok, "에이전트 로그인 성공" if ok else "에이전트 로그인 실패")
+
+
 def _apply(batch, event):
     kind, sid = event["type"], event.get("session_id") or ""
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
@@ -152,6 +165,8 @@ def _apply(batch, event):
             _on_friction(session, payload)
         elif kind == "session.finished":
             _on_session_finished(session, payload, when)
+        elif kind == "login.completed":
+            _on_login(batch, session, payload)
     RunEvent.objects.create(run=batch.run, task_run=batch.task_run, session=session, event_id=str(event["event_id"])[:40],
                             sequence=int(event.get("sequence") or 0), type=kind[:40], payload=payload, occurred_at=when)
 

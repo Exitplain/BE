@@ -209,6 +209,22 @@ def credentials_for_snapshot(snapshot, *, run_id=None):
     return result
 
 
+def credentials_for_discovery(project):
+    """사이트 확인(explore)에서 로그인한 상태로 둘러볼 때 쓰는 첫 번째 계정. 없으면 None.
+
+    반환: {"account_id", "url", "username", "password"}. 파일·로그에 남기지 말고 탐색 프로세스에만 넘길 것.
+    '사이트 확인에 사용' 감사 기록을 남긴다.
+    """
+    setting = TestAccountSet.objects.filter(project=project).first()
+    account = TestAccount.objects.select_related("project").filter(project=project).order_by("position").first()
+    if account is None or not (setting and setting.login_url):
+        return None
+    password = crypto.decrypt(account.password_encrypted, project_id=account.project_id)
+    TestAccount.objects.filter(pk=account.pk).update(last_used_at=timezone.now())
+    _log(account.project, TestAccountEvent.Action.USED, account=account, detail="site discovery")
+    return {"account_id": str(account.id), "url": setting.login_url, "username": account.username, "password": password}
+
+
 def record_check(account_id, ok, message=""):
     """로그인 확인 결과 기록 (P04c 확인됨/실패). 에이전트 쪽 로그인 기능이 생기면 여기에 결과를 넣는다."""
     account = TestAccount.objects.select_related("project").filter(pk=account_id).first()

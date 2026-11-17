@@ -27,7 +27,7 @@ class ExploreModeTests(WizardMixin, TestCase):
     def test_explored_tasks_flow_into_run_input_with_success_criteria(self, _):
         with patch("discoveries.services.run_exploration", return_value=EXPLORED) as explore:
             discovery = self.discover()
-        explore.assert_called_once_with("http://shop.local:8080/", ["http://shop.local:8080"])
+        explore.assert_called_once_with("http://shop.local:8080/", ["http://shop.local:8080"], login=None)
         self.assertEqual((discovery["variant"], discovery["tasks"][0]["success_criteria"]),
                          ("explore", "이메일·비밀번호 입력칸이 있는 회원가입 폼이 보인다"))
         plan = self.client.post(f"/api/v1/projects/{self.project.id}/plans", {"discovery_id": discovery["id"]},

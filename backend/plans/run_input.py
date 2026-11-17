@@ -16,7 +16,7 @@ RUN_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 UNSUPPORTED_FIELDS = (
     "tasks[].funnel (에이전트가 화면 경로로 7단계를 자동 결정)",
     "limits.cost_cap (에이전트에는 금액이 아니라 토큰 상한만 있음)",
-        "test_accounts (에이전트 로그인 기능이 생기면 testaccounts.services.credentials_for_snapshot으로 넘김)",
+        "test_accounts (계정 값은 입력에 넣지 않고 워커가 환경변수 DROPSPOT_CREDENTIALS 로만 넘김)",
 )
 MOBILE_MAX_WIDTH = 480
 VIEWPORT_HEIGHT = {"mobile": 844, "desktop": 800}
@@ -94,6 +94,10 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         "viewport_height": VIEWPORT_HEIGHT["mobile" if width <= MOBILE_MAX_WIDTH else "desktop"],
         "action_interval_seconds": min(float(limits["request_interval_seconds"]), 5.0),
     }
+    accounts = data.get("test_accounts")
+    if accounts:
+        # 계정 값은 넣지 않는다 (입력 파일로 남음). 워커가 실행할 때 환경변수로만 넘긴다 (runs/worker.py)
+        payload.update(login_url=accounts["login_url"] or None, read_only=True)
     try:
         return RunInput.model_validate(payload).model_dump(mode="json")
     except Exception as exc:  # pydantic ValidationError

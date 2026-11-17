@@ -46,12 +46,20 @@ def _path(url):
     return urlsplit(url).path or "/"
 
 
-async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=(1280, 800)):
-    """읽기 전용 둘러보기. [{path, depth, title, headings, links, buttons, forms, text}] (방문 순서)."""
+async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=(1280, 800), login=None):
+    """읽기 전용 둘러보기. [{path, depth, title, headings, links, buttons, forms, text}] (방문 순서).
+
+    login: {"url", "username", "password"} 테스트 계정. 있으면 먼저 로그인하고 로그인 뒤 첫 화면부터 둘러본다.
+    로그인 요청만 쓰기를 허용한다. 둘러보다 로그인 화면으로 튕기면(로그아웃 버튼 등) 다시 로그인하고 그 길은 적지 않는다.
+    계정 값은 메모리에만 두고 결과·로그에 남기지 않는다.
+    """
     from playwright.async_api import async_playwright
+    from .browser import login as sign_in_form
     pages, seen, queue = [], {_path(entry_url)}, deque([(entry_url, 0)])
     probes = [0]
-    blocked = {"writes": 0, "other_origins": 0}
+    blocked = {"writes": 0, "other_origins": 0, "relogins": 0}
+    logging_in = [False]
+    login_path = _path(login["url"]) if login else None
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         try:
@@ -62,7 +70,7 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                 if _origin(request.url) not in allowed_origins:
                     blocked["other_origins"] += 1
                     await route.abort()
-                elif request.method not in SAFE_METHODS:
+                elif request.method not in SAFE_METHODS and not logging_in[0]:
                     blocked["writes"] += 1
                     await route.abort()
                 else:
@@ -70,12 +78,41 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
             await context.route("**/*", guard)
             await context.route_web_socket("**/*", lambda ws: ws.close())
             page = await context.new_page()
+
+            async def sign_in():
+                logging_in[0] = True
+                try:
+                    return await sign_in_form(page, login["url"], login["username"], login["password"])
+                except Exception:
+                    return False                      # 예외 문구에 입력값이 섞이지 않게 버린다
+                finally:
+                    logging_in[0] = False
+
+            async def logged_out():
+                """로그인 화면으로 튕겼으면 다시 로그인하고 True."""
+                if not login or _path(page.url) != login_path:
+                    return False
+                blocked["relogins"] += 1
+                if not await sign_in():
+                    raise ValueError("테스트 계정으로 다시 로그인하지 못했습니다.")
+                return True
+
+            if login:
+                if not await sign_in():
+                    raise ValueError("테스트 계정으로 로그인하지 못했습니다.")
+                start = page.url.split("#")[0]           # 로그인 뒤 첫 화면 (예: /home)
+                seen = {login_path, _path(start)}
+                queue = deque([(start, 0)])
             while queue and len(pages) < max_pages:
                 url, depth = queue.popleft()
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                     await page.wait_for_timeout(1200)          # SPA 렌더링 대기
+                    if await logged_out():
+                        continue
                     snap = await page.evaluate(SNAPSHOT)
+                except ValueError:
+                    raise
                 except Exception:
                     continue
                 if _origin(page.url) not in allowed_origins:
@@ -104,6 +141,8 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                             await page.wait_for_timeout(1200)
                         except Exception:
                             continue
+                        if await logged_out():
+                            continue                      # 로그아웃되는 버튼: 다시 로그인하고 길로 적지 않는다
                         target = page.url
                         if _origin(target) in allowed_origins and _path(target) != _path(here):
                             links.append({"label": label, "path": _path(target), "via": "button"})
@@ -153,7 +192,9 @@ INSTRUCTIONS = (
     "from the snapshot paths, and suggested=true for the 2-4 most central tasks. start_path is normally the entry "
     "page; a task must need at least one navigation or interaction from start_path, so never start on the page that "
     "already satisfies its success_criteria. Never require entering real "
-    "personal data, payment, or destructive actions. ids are lowercase ascii words joined by hyphens.")
+    "personal data, payment, or destructive actions. If logged_in is true, the snapshots were taken while signed "
+    "in with a test account: propose tasks a signed-in user would do there, and do not propose login or signup "
+    "tasks. ids are lowercase ascii words joined by hyphens.")
 
 
 def _check(proposal, paths):
@@ -173,14 +214,14 @@ def _check(proposal, paths):
         raise ValueError("추천 과업이 없습니다.")
 
 
-def propose(pages, entry_url, client=None):
+def propose(pages, entry_url, client=None, logged_in=False):
     """둘러본 화면 요약 → Proposal (검사 통과한 것만)."""
     if client is None:
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise ValueError("ANTHROPIC_API_KEY is not set; site exploration needs a model to propose tasks")
         from anthropic import Anthropic
         client = Anthropic(timeout=90, max_retries=1)
-    payload = {"entry_url": entry_url, "pages": [{k: p[k] for k in ("path", "title", "headings", "links", "buttons", "forms", "text")}
+    payload = {"entry_url": entry_url, "logged_in": logged_in, "pages": [{k: p[k] for k in ("path", "title", "headings", "links", "buttons", "forms", "text")}
                                                    for p in pages]}
     try:
         response = client.messages.parse(model=EXPLORE_MODEL, max_tokens=8000, system=INSTRUCTIONS,
@@ -195,19 +236,23 @@ def propose(pages, entry_url, client=None):
     return proposal
 
 
-async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, max_depth=2):
-    """agent.preflight.discover_site 와 같은 모양의 결과. 과업은 success_criteria·start_path 를 쓴다."""
+async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, max_depth=2, login=None):
+    """agent.preflight.discover_site 와 같은 모양의 결과. 과업은 success_criteria·start_path 를 쓴다.
+
+    login 이 있으면 로그인한 상태로 둘러보고, 과업은 로그인한 사용자가 할 일로 제안한다 (requires_login=True)."""
     import asyncio
-    pages, blocked = await crawl(entry_url, allowed_origins, max_pages=max_pages, max_depth=max_depth)
+    pages, blocked = await crawl(entry_url, allowed_origins, max_pages=max_pages, max_depth=max_depth, login=login)
     if not pages:
         raise ValueError("시작 화면을 열지 못했습니다.")
-    proposal = await asyncio.to_thread(propose, pages, entry_url, client)
+    proposal = await asyncio.to_thread(propose, pages, entry_url, client, bool(login))
     features = [{"id": f.id, "name": f.name, "evidence": {"label": f.evidence_label, "path": f.evidence_path},
                  "verification": "explored_readonly"} for f in proposal.features]
     tasks = [{"id": t.id, "name": t.name, "goal": t.goal, "success_criteria": t.success_criteria, "success_path": None,
-              "start_path": t.start_path, "case": None, "feature_id": t.feature_id, "suggested": t.suggested}
+              "start_path": t.start_path, "case": None, "feature_id": t.feature_id, "suggested": t.suggested,
+              "requires_login": bool(login)}
              for t in proposal.tasks]
-    note = (f"화면 {len(pages)}개를 읽기 전용으로 둘러봤습니다 (쓰기 요청 {blocked['writes']}건 차단). "
+    who = "테스트 계정으로 로그인해 " if login else ""
+    note = (f"{who}화면 {len(pages)}개를 읽기 전용으로 둘러봤습니다 (쓰기 요청 {blocked['writes']}건 차단). "
             "기능·과업은 모델이 제안한 가설입니다.")
     return {"project": proposal.site_name, "features": features, "tasks": tasks, "note": note,
             "explored": [{"path": p["path"], "title": p["title"], "depth": p["depth"]} for p in pages]}
