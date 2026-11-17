@@ -8,7 +8,7 @@ Group=ubuntu
 WorkingDirectory=/srv/exitplain/BE/backend
 EnvironmentFile=/srv/exitplain/.env
 Environment=PYTHONPATH=/srv/exitplain/BE
-ExecStart=/srv/exitplain/venv/bin/gunicorn exitplain.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 60
+ExecStart=/srv/exitplain/venv/bin/gunicorn exitplain.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 180
 Restart=on-failure
 RestartSec=3
 
