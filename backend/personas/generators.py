@@ -39,7 +39,8 @@ def generate(audience_context, ages, segment_counts):
     if path == "personas.generators.fixture_generate":
         name, func = FIXTURE_NAME, fixture_generate
     elif path:
-        name, func = path, import_string(path)
+        func = import_string(path)
+        name = getattr(func, "generator_name", path)
     else:
         name, func = rules.NAME, rules.generate
     segments = func(audience_context, ages, segment_counts)

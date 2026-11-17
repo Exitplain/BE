@@ -222,7 +222,8 @@ EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
 # 기능·과업을 모델이 제안한다 (agent/explore.py, ANTHROPIC_API_KEY 필요, 과업은 말로 쓴 성공 기준을 쓴다)
 EXITPLAIN_DISCOVERY_MODE = os.environ.get('EXITPLAIN_DISCOVERY_MODE', 'demo')
 # 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
-EXITPLAIN_PERSONA_GENERATOR = None
+# 비우면 규칙 기반(rules-v1). LLM 생성기: personas.llm.generate (ANTHROPIC_API_KEY 필요, 모델은 EXITPLAIN_PERSONA_MODEL)
+EXITPLAIN_PERSONA_GENERATOR = os.environ.get('EXITPLAIN_PERSONA_GENERATOR') or None
 # 데모 쇼핑몰용 ?variant=&case= 를 실행 URL에 붙일지
 EXITPLAIN_APPEND_DEMO_QUERY = True
 # 에이전트 실행 결과 폴더 (agent.execute_run의 output_dir). 세션 상세가 여기서 events.jsonl을 읽는다
