@@ -72,6 +72,17 @@ class CryptoTests(KmsMixin, TestCase):
         with self.assertRaises(crypto.KeyUnavailable):
             crypto.encrypt("pw", project_id=1)
 
+    def test_access_denied_cause_is_logged_without_password(self):
+        """화면 문구는 하나라 원인은 로그로 본다 (운영에서 IAM 역할에 kms 권한이 없던 경우)."""
+        denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}},
+                             "GenerateDataKey")
+        with patch.object(self.kms, "generate_data_key", side_effect=denied), \
+                self.assertLogs("testaccounts.crypto", "WARNING") as logs, self.assertRaises(crypto.KeyUnavailable):
+            crypto.encrypt("secret-pw", project_id=1)
+        self.assertIn("GenerateDataKey", logs.output[0])
+        self.assertIn("AccessDeniedException", logs.output[0])
+        self.assertNotIn("secret-pw", logs.output[0])
+
     def test_old_fernet_value_still_readable(self):
         with override_settings(TEST_ACCOUNT_KMS_KEY_ID=""):
             old = crypto.encrypt("legacy-pw")

@@ -18,6 +18,7 @@
 """
 import base64
 import hashlib
+import logging
 import os
 
 from cryptography.exceptions import InvalidTag
@@ -27,6 +28,8 @@ from django.conf import settings
 
 KMS_PREFIX = "kms1:"
 _BAD_KEY_CODES = {"InvalidCiphertextException", "IncorrectKeyException"}
+
+logger = logging.getLogger(__name__)
 
 
 class DecryptError(ValueError):
@@ -74,6 +77,11 @@ def _error_code(exc):
     return response.get("Error", {}).get("Code", "") if isinstance(response, dict) else ""
 
 
+def _log_unavailable(operation, exc):
+    """화면에는 한 문구만 보이므로 원인(권한·네트워크·설정)은 서버 로그에 남긴다. 비밀번호·키 값은 남기지 않는다."""
+    logger.warning("KMS %s 실패: %s %s %s", operation, type(exc).__name__, _error_code(exc), str(exc)[:300])
+
+
 def _context(project_id):
     if project_id is None:
         raise ValueError("KMS 암호화에는 project_id가 필요합니다.")
@@ -93,6 +101,7 @@ def _kms_encrypt(text, project_id):
     try:
         res = _kms().generate_data_key(KeyId=kms_key_id(), KeySpec="AES_256", EncryptionContext=context)
     except Exception as exc:
+        _log_unavailable("GenerateDataKey", exc)
         raise KeyUnavailable("암호화 키 서비스(KMS)를 부르지 못했습니다.") from exc
     nonce = os.urandom(12)
     sealed = AESGCM(res["Plaintext"]).encrypt(nonce, text.encode(), context["project"].encode())
@@ -111,6 +120,7 @@ def _kms_decrypt(token, project_id):
     except Exception as exc:
         if _error_code(exc) in _BAD_KEY_CODES:
             raise DecryptError("저장된 비밀번호를 풀 수 없습니다. 테스트 계정을 다시 입력해주세요.") from exc
+        _log_unavailable("Decrypt", exc)
         raise KeyUnavailable("암호화 키 서비스(KMS)를 부르지 못했습니다.") from exc
     try:
         return AESGCM(res["Plaintext"]).decrypt(body[:12], body[12:], context["project"].encode()).decode()
