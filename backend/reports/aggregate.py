@@ -17,7 +17,7 @@ DB를 쓰지 않는 순수 함수라 샘플 데이터로 바로 테스트할 수
 from collections import Counter, defaultdict
 from statistics import median
 
-from .journey import journey_funnel
+from .journey import journey_funnel, screen_id
 
 SCHEMA_VERSION = "report-2"
 
@@ -176,10 +176,13 @@ def session_row(r, technical, segment_of):
     """세션 1개를 목록 한 줄로. 세션 상세 API의 주소(task_id, seed, persona_id)가 그대로 들어 있다."""
     segment_id, segment_name = segment_of.get(r["persona_id"], ("unknown", "알 수 없음"))
     stages = r.get("stages") or []
+    screens = r.get("screens") or []
     return {"task_id": r["task_id"], "seed": r["seed"], "persona_id": r["persona_id"],
             "segment_id": segment_id, "segment_name": segment_name,
             "status": r["status"], "kind": classify(r["status"], technical),
-            "terminal_stage": stages[-1] if stages else None, "primary_cause": r.get("primary_cause"),
+            "terminal_stage": stages[-1] if stages else None,
+            "terminal_screen": screen_id(screens[-1].get("url")) if screens else None,   # 실행 퍼널 단계 ID (발견한 문제)
+            "primary_cause": r.get("primary_cause"),
             "steps": r.get("steps", 0), "duration_seconds": r.get("duration_seconds")}
 
 def build_report_data(snapshot_data, records):

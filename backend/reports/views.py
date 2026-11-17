@@ -5,12 +5,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from common.exceptions import ApiError
-from common.projects import ensure_owner, get_owned_project
+from common.projects import ensure_owner, get_owned_project, project_model
 from common.views import BaseAPIView
 
 from plans.serializers import StrictSerializer
 
-from . import exporters, services
+from . import exporters, issues, services
 from .models import ReportSnapshot, ShareLink
 
 
@@ -80,7 +80,22 @@ class ProjectDashboardView(BaseAPIView):
     def get(self, request, project_id):
         return Response(services.dashboard(get_owned_project(request.user, project_id)))
 
+class ProjectIssuesView(BaseAPIView):
+    """GET /api/v1/projects/{id}/issues — 프로젝트의 발견한 문제 (Figma C09)"""
 
+    def get(self, request, project_id):
+        return Response(issues.issues_dict([get_owned_project(request.user, project_id)]))
+
+
+class IssuesView(BaseAPIView):
+    """GET /api/v1/issues — 내 모든 프로젝트(보관한 프로젝트 제외)의 발견한 문제 (Figma W03)"""
+
+    def get(self, request):
+        projects = project_model().objects.filter(owner=request.user)
+        if hasattr(project_model(), "archived_at"):
+            projects = projects.filter(archived_at__isnull=True)
+        return Response(issues.issues_dict(projects.order_by("pk")))
+    
 # ---------- 내보내기 (11/16 Markdown, 11/17 PDF) ----------
 
 class AnyAcceptNegotiation(BaseContentNegotiation):
