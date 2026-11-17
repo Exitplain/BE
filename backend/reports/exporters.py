@@ -36,6 +36,26 @@ def _table(headers, rows):
     lines += ["| " + " | ".join(_cell(v) for v in row) + " |" for row in rows]
     return lines
 
+def _funnel_section(task):
+    """퍼널 표. 실행 퍼널(journey_funnel: 실제로 지나간 화면)이 있으면 그것을 쓰고,
+    없으면(실행 퍼널이 생기기 전에 만든 리포트) 예전 7단계 funnel을 쓴다.
+    7단계 funnel은 지나가지 않은 단계가 0명으로 찍혀서 내보내기에는 쓰지 않는다."""
+    headers = ["단계", "도달", "시드별 범위", "직전 대비", "이 단계 이탈"]
+    journey = task.get("journey_funnel") or {}
+    stages = journey.get("stages") or []
+    if not stages:
+        return ["### 퍼널", ""] + _table(headers, [
+            [f["name"], f["reached"], _range(f.get("reached_range")), _pct(f.get("rate_of_previous")),
+             f.get("dropouts_here", 0)] for f in task.get("funnel", [])]) + [""]
+    rows = [[s["name"] if s["name"] == s["path"] else f"{s['name']} ({s['path']})",
+             s["reached"], _range(s.get("reached_range")), _pct(s.get("rate_of_previous")), s.get("dropouts_here", 0)]
+            for s in stages]
+    other = journey.get("other") or {}
+    if other.get("dropouts"):
+        rows.append([f"기타 화면 {other.get('screens', 0)}곳", "-", "-", "-", other["dropouts"]])
+    return (["### 퍼널 (실제로 지나간 화면)", "",
+             "- 페르소나들이 실제로 지나간 화면으로 만든 단계입니다. 앞 단계를 건너뛴 세션이 있으면 직전 대비가 100%를 넘을 수 있습니다.",
+             ""] + _table(headers, rows) + [""])
 
 def _context(report):
     plan_data = report.plan_snapshot.data
@@ -74,10 +94,8 @@ def report_markdown(report):
                 f"가상 이탈 {task.get('dropout', 0)}명 (시드별 {_range(ranges.get('dropout'))}), "
                 f"기술 실패 {task.get('technical', 0)}건",
                 f"- 세션 시간 중앙값 {kpis.get('median_duration_seconds') or '-'}초, "
-                f"행동 수 중앙값 {kpis.get('median_steps') or '-'}", "", "### 퍼널", ""]
-        out += _table(["단계", "도달", "시드별 범위", "직전 대비", "이 단계 이탈"],
-                      [[f["name"], f["reached"], _range(f.get("reached_range")), _pct(f.get("rate_of_previous")),
-                        f.get("dropouts_here", 0)] for f in task.get("funnel", [])]) + [""]
+                f"행동 수 중앙값 {kpis.get('median_steps') or '-'}", ""]
+        out += _funnel_section(task)
         top = task.get("top_causes", [])
         out += ["### 이탈 원인 Top 3", ""]
         out += [f"{i}. {c['name']}: 이탈 {c['dropouts']}명 ({_pct(c.get('share'))})" for i, c in enumerate(top, 1)] \

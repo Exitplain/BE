@@ -48,9 +48,18 @@ class ExportTests(WizardMixin, TestCase):
         text = res.content.decode("utf-8")
         self.assertIn("# Exitplain 진단 리포트", text)
         self.assertIn("| 달성률 | 89.5% |", text)                       # 17 / (17 + 2), 기술 실패 1건 제외
-        self.assertIn("| 가입 | 19 | 19 | 100.0% | 2 |", text)          # 퍼널 7단계 표
+        self.assertIn("### 퍼널 (실제로 지나간 화면)", text)             # 실행 퍼널(journey_funnel)로 내보냄
+        self.assertIn("| /signup | 19 | 19 | 100.0% | 2 |", text)
+        self.assertNotIn("| 탐색 |", text)                               # 지나가지 않은 7단계 '탐색' 0명 줄이 없음
         self.assertIn("1. 입력 부담: 이탈 2명 (100.0%)", text)
         self.assertIn("## 기술 실패 (1건, 이탈률 계산에서 제외)", text)
+
+    def test_old_report_without_journey_uses_seven_stage_funnel(self, _):
+        report = self.make_report()
+        for task in report.data["tasks"]:
+            task.pop("journey_funnel")                                  # 실행 퍼널이 생기기 전에 만든 리포트
+        text = exporters.report_markdown(report)
+        self.assertIn("| 가입 | 19 | 19 | 100.0% | 2 |", text)
 
     def test_markdown_to_html_escapes_and_builds_tables(self, _):
         page = exporters.markdown_to_html("# 제목\n\n| a | b |\n|---|---|\n| <x> | 1\\|2 |\n\n- 하나\n1. 둘\n> 안내")
