@@ -18,11 +18,19 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
        b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82")
 PATHS = ["/", "/product", "/cart"]
 STAGES = ["landing", "browse", "detail"]  # 에이전트 agent/funnel.py 의 단계 이름 중 일부 (모양만 같게)
+TITLES = ["반찬로드", "이번 주 식탁", "장바구니"]   # 실행 퍼널의 단계 이름 (화면 제목)
+
+
+def screen_url(base_url, path):
+    """시작 주소의 출처에 경로를 붙인다 (?variant= 같은 쿼리 뒤에 경로가 붙지 않게)."""
+    parts = urlsplit(base_url)
+    return f"{parts.scheme}://{parts.netloc}{path}"
 
 
 class Writer:
@@ -54,7 +62,8 @@ class Writer:
 def observe(writer, sid, step, base_url):
     step_id = f"step_{step:03d}"
     artifact = writer.screenshot(sid, f"{step_id}.png")
-    writer.emit("observation.created", sid, {"step_id": step_id, "url": base_url.rstrip("/") + PATHS[step % 3],
+    writer.emit("observation.created", sid, {"step_id": step_id, "url": screen_url(base_url, PATHS[step % 3]),
+                                              "title": TITLES[step % 3],
                                               "artifact": artifact, "required_fields": 7 if step == 1 else 2,
                                               "text": f"{step}번째 화면", "stage": STAGES[step % 3],
                                               "frustration_score": 20.0 * step, "frustration_threshold": 60.0})

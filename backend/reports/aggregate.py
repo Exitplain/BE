@@ -8,6 +8,7 @@ DB를 쓰지 않는 순수 함수라 샘플 데이터로 바로 테스트할 수
 - 기술 실패와 결과 없음은 퍼널·달성률·원인 분모에서 뺀다 (API_SPEC 4.3: 기술 실패를 이탈률에 합산하지 않음).
 - 퍼널: 과업마다 같은 7단계(agent/funnel.py FUNNEL). 세션이 같은 단계를 여러 번 지나가도 처음 도달만 1번 센다.
   이탈 단계 = 이탈한 세션이 마지막으로 본 화면의 단계.
+- 실행 퍼널(journey_funnel): 실제로 지나간 화면으로 과업마다 단계를 만든다 (reports/journey.py). 7단계를 대체할 값.
 - 시드 범위: 같은 과업을 시드별로 따로 집계해 최솟값~최댓값을 함께 준다 (예: 완료 17~19명).
   합계 숫자는 모든 시드를 더한 값이다.
 - 이탈 원인: 가상 이탈 세션의 주 원인(primary) 분포와 Top 3. 주 원인이 없는 이탈은 'unknown'.
@@ -15,6 +16,8 @@ DB를 쓰지 않는 순수 함수라 샘플 데이터로 바로 테스트할 수
 """
 from collections import Counter, defaultdict
 from statistics import median
+
+from .journey import journey_funnel
 
 SCHEMA_VERSION = "report-2"
 
@@ -85,6 +88,7 @@ def _task_report(task, group, personas, seeds, technical, segment_of):
     durations, steps = [], []
     unknown_stage = 0
     technical_failures = []
+    journey_rows = []                                # 실행 퍼널 재료 (reports/journey.py)
 
     for r in group:
         kind = classify(r["status"], technical)
@@ -96,6 +100,7 @@ def _task_report(task, group, personas, seeds, technical, segment_of):
                                        "status": r["status"], "reason": r["reason"]})
         if kind not in ("success", "dropout"):
             continue  # 퍼널·달성률·원인 분모에서 제외
+        journey_rows.append({"kind": kind, "seed": r["seed"], "segment": segment, "screens": r.get("screens") or []})
         stages = _first_reached(r.get("stages") or [])
         unknown_stage += sum(1 for s in stages if s not in funnel_keys)
         stages = [s for s in stages if s in funnel_keys]
@@ -152,6 +157,8 @@ def _task_report(task, group, personas, seeds, technical, segment_of):
             "median_steps": median(steps) if steps else None,
         },
         "funnel": funnel,
+        # 실제로 지나간 화면으로 만든 과업별 퍼널. 7단계 funnel·heatmap 은 기존 화면 호환용으로 그대로 둔다
+        "journey_funnel": journey_funnel(journey_rows, success_path=task.get("success_path"), seeds=seeds),
         "causes": causes,
         "top_causes": [c for c in causes if c["dropouts"]][:3],
         "heatmap": {

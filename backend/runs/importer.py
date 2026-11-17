@@ -88,7 +88,7 @@ def _on_observation(session, payload, when):
         return
     step = int(match.group(1))
     Observation.objects.get_or_create(session=session, step=step, defaults={
-        "step_id": step_id[:20], "url": str(payload.get("url") or "")[:1000],
+        "step_id": step_id[:20], "url": str(payload.get("url") or "")[:1000], "title": str(payload.get("title") or "")[:200],
         "artifact": relative_artifact(payload.get("artifact")), "required_fields": int(payload.get("required_fields") or 0),
         "text": str(payload.get("text") or ""), "stage": str(payload.get("stage") or "")[:40],
         "frustration_score": _number(payload.get("frustration_score")),
