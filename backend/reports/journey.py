@@ -85,6 +85,12 @@ def journey_funnel(rows, *, success_path=None, seeds=1):
     best_title = {k: short[t] for k, t in best_title.items()}
     shared = {t for t, n in Counter(best_title.values()).items() if n > 1}
     names = {k: best_title[k] if best_title.get(k) and best_title[k] not in shared else k for k in stages}
+    texts = {}                                          # 단계마다 화면 글자 예시 하나 (역할 이름 붙이기용, 보고서에는 안 남김)
+    for row in rows:
+        for screen in row["screens"]:
+            key = screen_id(screen.get("url"))
+            if key in main and key not in texts and screen.get("text"):
+                texts[key] = screen["text"]
 
     dropouts_at, heat, per_seed = Counter(), defaultdict(Counter), defaultdict(Counter)
     segments = set()
@@ -100,7 +106,8 @@ def journey_funnel(rows, *, success_path=None, seeds=1):
     funnel, previous = [], None
     for order, key in enumerate(stages):
         funnel.append({
-            "id": key, "path": key, "name": names[key], "order": order,
+            "id": key, "path": key, "name": names[key], "name_source": "path" if names[key] == key else "title",
+            "title": best_title.get(key, ""), "order": order,
             "reached": counts[key], "reached_range": _range(per_seed[s][key] for s in range(1, seeds + 1)),
             "rate_of_valid": _rate(counts[key], valid),
             "rate_of_previous": _rate(counts[key], previous) if previous else None,
@@ -112,6 +119,7 @@ def journey_funnel(rows, *, success_path=None, seeds=1):
         "basis": "observed_screens",
         "valid_sessions": valid,
         "stages": funnel,
+        "_screen_texts": texts,             # 저장 전에 reports/stage_names.py 가 쓰고 지운다
         "other": {"screens": len(set(counts) - main), "dropouts": dropouts_at[OTHER]},
         "heatmap": {"stages": columns,
                     "rows": [{"segment_id": sid, "name": name, "dropouts": [heat[(sid, name)][k] for k in columns]}

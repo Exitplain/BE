@@ -10,11 +10,11 @@ from common.exceptions import ApiError
 from . import sessions as session_files
 from . import sources
 from .aggregate import build_report_data
+from .stage_names import apply_role_names
 from .models import ReportSnapshot, ShareLink
 from .models import ReportSnapshot
 
 
-@transaction.atomic
 def create_report(plan_snapshot, records, *, run_ref, source, user=None, run=None):
     """세션 기록으로 리포트를 집계해 저장한다. 같은 run_ref를 다시 집계하면 revision이 1 올라간 새 행이 생긴다."""
     if not run_ref or len(run_ref) > 100:
@@ -22,8 +22,15 @@ def create_report(plan_snapshot, records, *, run_ref, source, user=None, run=Non
     if "personas" not in plan_snapshot.data:
         raise ApiError(409, "PERSONAS_MISSING", "페르소나가 없는 스냅샷이라 집계할 수 없습니다.")
     data = build_report_data(plan_snapshot.data, records)
+    # 실행 퍼널 단계에 화면 역할 이름 (모델 호출이라 DB 잠금 밖에서 한다)
+    apply_role_names(data, project_id=plan_snapshot.plan.project_id)
     data["plan_revision_id"] = str(plan_snapshot.id)
     data["run_ref"] = run_ref
+    return _save_report(plan_snapshot, data, run_ref=run_ref, source=source, user=user, run=run)
+
+
+@transaction.atomic
+def _save_report(plan_snapshot, data, *, run_ref, source, user=None, run=None):
     last = (ReportSnapshot.objects.select_for_update().filter(run_ref=run_ref)
             .aggregate(m=Max("revision"))["m"] or 0)
     return ReportSnapshot.objects.create(
