@@ -74,6 +74,11 @@ chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
 | `TEST_ACCOUNT_KMS_KEY_ID` | 테스트 계정 비밀번호용 KMS 키 ARN (또는 `alias/exitplain-test-accounts`) | 비우면 Fernet(SECRET_KEY 기반). EC2 IAM 역할에 이 키의 `kms:GenerateDataKey`·`kms:Decrypt` 권한 필요. 넣은 뒤 `manage.py reencrypt_test_accounts` |
 | `TEST_ACCOUNT_KMS_REGION` | KMS 리전 | 기본 `ap-northeast-2` |
 | `TEST_ACCOUNT_RETENTION_DAYS` | 테스트 계정 보관 기간(일) | 기본 90. `manage.py purge_test_accounts`를 하루 한 번 실행 |
+| `EXITPLAIN_SOURCE_ROOT` | 코드 연결(zip·git)로 받은 코드를 두는 폴더 | 예: `/srv/exitplain/data/source_snapshots`. 레포 밖에 둔다. nginx 로 직접 서빙하지 않는다 |
+| `EXITPLAIN_SOURCE_GIT_HOSTS` | 받을 수 있는 공개 git 호스트 | 기본 `github.com,gitlab.com`. 서버에 `git` 이 설치돼 있어야 한다 |
+| `EXITPLAIN_SOURCE_MAX_UPLOAD_BYTES` 등 | zip 크기·파일 수·압축률 한도 | 기본 30MB 업로드 / 200MB·1만 개 해제. nginx `source-snapshots` 위치의 `client_max_body_size` 와 맞춘다 |
+
+코드 연결 nginx 설정(`source-snapshots` 의 30MB 업로드)은 `deploy.sh` 가 복사하지 않는다. 바꾼 뒤 한 번 `sudo cp deploy/nginx-exitplain.conf /etc/nginx/sites-available/exitplain && sudo nginx -t && sudo systemctl reload nginx`.
 
 ## 4. `settings.py` 반영 내용 (`a/deploy-settings` 브랜치, 문서 규칙상 PR로 머지)
 위 3절의 환경변수를 `settings.py`가 읽도록 이미 반영했다. 환경변수가 없으면 로컬 개발 기본값으로 동작한다.

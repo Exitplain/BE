@@ -10,14 +10,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import FF, add_common_args, finish  # noqa: E402
+from _common import ANALYZER, add_common_args, finish  # noqa: E402
 
 VOCAB = {"landing", "product", "cart", "signup", "checkout", "complete", "delivery", "benefits", "coupon",
          "account", "subscription", "home", "basket", "order", "payment", "login", "shop", "pricing"}
 # "success" is not listed: success_rule / success_route are contract terms, not a stage name.
 # "order" is the exact schema key of stages[].order; only that exact string is allowed.
 ALLOW_EXACT = {"order"}
-TARGETS = ("detect_framework.py", "extract_routes.py")
+TARGETS = ("detect_framework.py", "extract_routes.py", "static_site.py")   # agent/source 의 분석기 본체
 
 
 def scan_source(source):
@@ -40,7 +40,7 @@ def main():
         sys.exit(code)
     findings = {}
     for name in TARGETS:
-        hits = scan_source((FF / name).read_text("utf-8"))
+        hits = scan_source((ANALYZER / name).read_text("utf-8"))
         if hits:
             findings[name] = hits
     verdict = "pass" if not findings else "fail"

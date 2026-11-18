@@ -4,31 +4,26 @@
 - create_discovery: 요청 안에서 끝까지 기다렸다가 결과를 돌려준다 (기존 동작, 201).
 - start_discovery: running 상태로 만들어 바로 돌려주고(202) 백그라운드 스레드에서 둘러본다. 화면은 GET 으로 진행 피드를 읽는다.
 
-둘러보는 쪽은 이벤트 루프 안이라 ORM 을 쓸 수 없다. 그래서 진행 사건은 ProgressLog 에 모으고,
-둘러보기를 감싼 바깥 스레드가 FLUSH_SECONDS 마다 DB 에 쓴다.
+둘러보는 쪽은 이벤트 루프 안이라 ORM 을 쓸 수 없다. 진행 기록·백그라운드 실행은 common/progress.py 를 쓴다.
 """
 import asyncio
 import logging
-import threading
 import time
 from datetime import timedelta
 from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.db import connections
 from django.utils import timezone
 
 from common.exceptions import ApiError
+from common.progress import (HEARTBEAT_SECONDS, PROGRESS_LIMIT, STALE_SECONDS, ProgressLog,  # noqa: F401
+                             next_seq, run_tracked, start_background)
 from common.projects import project_target
 
 from .models import Discovery
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_LIMIT = 100          # 화면에 보여 줄 최근 사건 수
-FLUSH_SECONDS = 0.5           # 진행 사건을 DB 에 쓰는 간격
-HEARTBEAT_SECONDS = 5         # 새 사건이 없어도 이 간격으로 updated_at 을 갱신한다
-STALE_SECONDS = 120           # 이만큼 갱신이 없으면 중단된 것으로 본다 (서버 재시작 등)
 UNREACHABLE = "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요."
 
 
@@ -64,40 +59,6 @@ def _screen_names(names):
 def _origin(url):
     p = urlsplit(url)
     return f"{p.scheme}://{p.netloc}"
-
-
-class ProgressLog:
-    """진행 사건 모음. add 는 어느 스레드에서 불러도 되고, flush 는 ORM 을 쓸 수 있는 스레드에서만 부른다."""
-
-    def __init__(self, discovery):
-        self.discovery = discovery
-        self.lock = threading.Lock()
-        self.pending = []
-        self.seq = max((e.get("seq", 0) for e in discovery.progress), default=0)
-        self.started = time.monotonic()
-        self.saved_at = time.monotonic()
-
-    def add(self, event):
-        message = str(event.get("message") or "")[:200]
-        if not message:
-            return
-        with self.lock:
-            self.seq += 1
-            self.pending.append({**event, "message": message, "seq": self.seq,
-                                 "t": round(time.monotonic() - self.started, 1)})
-
-    def take(self):
-        with self.lock:
-            new, self.pending = self.pending, []
-        if new:
-            self.discovery.progress = (self.discovery.progress + new)[-PROGRESS_LIMIT:]
-        return bool(new)
-
-    def flush(self):
-        """새 사건이 있거나 마지막 저장 뒤 HEARTBEAT_SECONDS 가 지났으면 저장한다."""
-        if self.take() or time.monotonic() - self.saved_at >= HEARTBEAT_SECONDS:
-            self.discovery.save(update_fields=["progress", "updated_at"])
-            self.saved_at = time.monotonic()
 
 
 def _prepare(project, data):
@@ -160,25 +121,11 @@ def _new(user, project, ctx):
 
 def _execute(discovery, ctx):
     """둘러보기를 끝까지 돌리고 결과를 저장한다. 실패하면 (HTTP 상태, 코드, 문구), 성공하면 None."""
-    log = ProgressLog(discovery)
-    box = {}
-
-    def work():
-        try:
-            box["result"] = _work(ctx, log.add)
-        except BaseException as exc:          # noqa: BLE001 - 어떤 실패든 상태로 남긴다
-            box["error"] = exc
-
-    worker = threading.Thread(target=work, name=f"discovery-{discovery.pk}", daemon=True)
-    worker.start()
-    while worker.is_alive():
-        worker.join(FLUSH_SECONDS)
-        log.flush()
-
-    account, result, failure = ctx["account"], box.get("result"), None
-    if "error" in box:
-        logger.warning("사이트 확인 실패 %s: %s", discovery.pk, type(box["error"]).__name__)
-        failure = _failure(box["error"], account)
+    result, error, log = run_tracked(discovery, lambda progress: _work(ctx, progress), f"discovery-{discovery.pk}")
+    account, failure = ctx["account"], None
+    if error is not None:
+        logger.warning("사이트 확인 실패 %s: %s", discovery.pk, type(error).__name__)
+        failure = _failure(error, account)
     else:
         if account:
             from testaccounts.services import record_check
@@ -224,12 +171,10 @@ def _run_in_background(discovery_id, ctx):
     try:
         _execute(Discovery.objects.get(pk=discovery_id), ctx)
     except Exception:
-        logger.exception("사이트 확인 백그라운드 작업 오류 %s", discovery_id)
         Discovery.objects.filter(pk=discovery_id, status=Discovery.Status.RUNNING).update(
             status=Discovery.Status.FAILED, error_code="SITE_UNREACHABLE", error_message=UNREACHABLE,
             updated_at=timezone.now())
-    finally:
-        connections.close_all()
+        raise
 
 
 def start_discovery(user, project, data):
@@ -242,8 +187,7 @@ def start_discovery(user, project, data):
         raise ApiError(429, "DISCOVERY_BUSY", "지금 확인 중인 사이트가 많아요. 잠시 뒤 다시 시도해주세요.")
     discovery = _new(user, project, ctx)
     if settings.EXITPLAIN_DISCOVERY_BACKGROUND:
-        threading.Thread(target=_run_in_background, args=(discovery.pk, ctx), name=f"discovery-job-{discovery.pk}",
-                         daemon=True).start()
+        start_background(_run_in_background, discovery.pk, ctx, name=f"discovery-job-{discovery.pk}")
     else:
         _execute(discovery, ctx)
     return discovery
@@ -256,7 +200,7 @@ def mark_if_stale(discovery):
         message = "사이트 확인이 중간에 멈췄어요. 다시 시도해주세요."
         discovery.status, discovery.error_code, discovery.error_message = \
             Discovery.Status.FAILED, "DISCOVERY_INTERRUPTED", message
-        discovery.progress = (discovery.progress + [{"seq": max((e.get("seq", 0) for e in discovery.progress), default=0) + 1,
-                                                      "t": None, "kind": "failed", "message": message}])[-PROGRESS_LIMIT:]
+        discovery.progress = (discovery.progress + [{"seq": next_seq(discovery.progress), "t": None, "kind": "failed",
+                                                      "message": message}])[-PROGRESS_LIMIT:]
         discovery.save(update_fields=["status", "error_code", "error_message", "progress", "updated_at"])
     return discovery
