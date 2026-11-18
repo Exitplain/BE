@@ -18,6 +18,9 @@ class MeasureSite(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_received_at = models.DateTimeField(null=True, blank=True)
     last_origin = models.CharField(max_length=200, blank=True, default="")
+    # R05 단계 매핑 {실측 단계 ID(경로 또는 exitplain.step 이름): 예측 실행 퍼널 단계 ID(경로) | null(매핑 안 함)}
+    mapping = models.JSONField(default=dict, blank=True)
+    mapping_saved_at = models.DateTimeField(null=True, blank=True)
 
 
 class MeasureHit(models.Model):

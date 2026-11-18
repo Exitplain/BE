@@ -1,12 +1,15 @@
 """실측 수집: 키 발급·설치 확인·수집 받기(출처 검사·개인정보 경로 가리기·제한)·경로별 집계."""
 import json
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 
-from common.testing import WizardMixin
+from common.testing import WizardMixin, fake_discovery
 from measurements import services
 from measurements.models import MeasureHit, MeasureSite
+from plans.models import PlanSnapshot
+from reports.models import ReportSnapshot
 
 ORIGIN = "https://shop.example.com"
 
@@ -112,6 +115,94 @@ class MeasurementTests(WizardMixin, TestCase):
         self.assertEqual(services.normalize_path("/"), "/")
         self.assertEqual(services.normalize_path("/cart/"), "/cart")
         self.assertEqual(services.normalize_path("/a/1234/b"), "/a/:id/b")
-        self.assertEqual(services.normalize_path("/a/12/b"), "/a/12/b")
+        self.assertEqual(services.normalize_path("/a/12/b"), "/a/:id/b")
+        self.assertEqual(services.normalize_path("/Cart/"), "/cart")
         self.assertIsNone(services.normalize_path("https://x/"))
         self.assertTrue(MeasureSite._meta.get_field("key").unique)
+
+
+def _stage(path, name, goal=False):
+    return {"id": path, "path": path, "name": name, "is_goal": goal}
+
+
+REPORT_DATA = {"tasks": [
+    {"task_id": "order", "name": "첫 주문", "journey_funnel": {"stages": [
+        _stage("/", "첫 화면"), _stage("/products/:id", "상품 상세"), _stage("/cart", "장바구니"),
+        _stage("/order/success", "주문 완료", goal=True)]}},
+    {"task_id": "coupon", "name": "쿠폰 주문", "journey_funnel": {"stages": [
+        _stage("/", "첫 화면"), _stage("/coupon", "쿠폰")]}},
+]}
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class MappingTests(WizardMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.project.entry_url = ORIGIN + "/"
+        self.project.save()
+        self.url = f"/api/v1/projects/{self.project.id}/measurement"
+        self.beacon = Client()
+
+    def issue(self):
+        return self.client.post(self.url, {}, format="json").json()["key"]
+
+    def send(self, key, path, sid="abcd1234efgh", **extra):
+        body = json.dumps({"key": key, "sid": sid, "path": path, **extra})
+        self.beacon.post("/api/v1/collect", body, content_type="text/plain", HTTP_ORIGIN=ORIGIN)
+
+    def report(self):
+        snapshot = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        ReportSnapshot.objects.create(plan_snapshot=snapshot, run_ref="r1", revision=1, status="final",
+                                      source="database", data=REPORT_DATA)
+
+    def test_collected_paths_use_the_same_stage_ids_as_the_agent_funnel(self, _):
+        key = self.issue()
+        self.send(key, "/Product/12")
+        self.send(key, "/product/34/")
+        self.assertEqual(set(MeasureHit.objects.values_list("path", flat=True)), {"/product/:id"})
+
+    def test_without_a_prediction_report_there_is_nothing_to_map_to(self, _):
+        key = self.issue()
+        self.send(key, "/")
+        body = self.client.get(self.url + "/mapping").json()
+        self.assertEqual((body["reason"], body["stages"], body["rows"][0]["stage_id"]), ("NO_PREDICTION", [], None))
+
+    def test_suggests_exact_and_similar_then_saves(self, _):
+        self.report()
+        key = self.issue()
+        for path in ("/", "/product/1", "/cart", "/order/success", "/faq"):
+            self.send(key, path)
+        self.send(key, "/cart", step="coupon_applied")
+        body = self.client.get(self.url + "/mapping").json()
+        self.assertEqual([s["id"] for s in body["stages"]], ["/", "/products/:id", "/cart", "/order/success", "/coupon"])
+        self.assertEqual(body["stages"][0]["tasks"], ["첫 주문", "쿠폰 주문"])
+        rows = {r["step_id"]: (r["stage_id"], r["suggestion"]) for r in body["rows"]}
+        self.assertEqual(rows, {"/": ("/", "exact"), "/product/:id": ("/products/:id", "similar"),
+                                "/cart": ("/cart", "exact"), "/order/success": ("/order/success", "exact"),
+                                "/faq": (None, None), "coupon_applied": (None, None)})
+        self.assertEqual(body["mapped"], 4)
+
+        res = self.client.put(self.url + "/mapping", {"mapping": {"/": "/", "coupon_applied": "/coupon", "/faq": None}},
+                              format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        rows = {r["step_id"]: (r["stage_id"], r["saved"]) for r in res.json()["rows"]}
+        self.assertEqual(rows["coupon_applied"], ("/coupon", True))
+        self.assertEqual(rows["/faq"], (None, True))
+        self.assertEqual(rows["/cart"], ("/cart", False))      # 저장 안 한 행은 계속 추천값
+        self.assertIsNotNone(res.json()["saved_at"])
+
+    def test_rejects_unknown_stage_and_extra_fields(self, _):
+        self.report()
+        self.issue()
+        res = self.client.put(self.url + "/mapping", {"mapping": {"/": "/nope"}}, format="json")
+        self.assertEqual(res.status_code, 422)
+        self.assertIn("mapping./", res.json()["error"]["fields"])
+        self.assertEqual(self.client.put(self.url + "/mapping", {"mapping": {}, "x": 1}, format="json").status_code, 422)
+        self.assertEqual(self.client.put(self.url + "/mapping", {"mapping": []}, format="json").status_code, 422)
+
+    def test_mapping_needs_issued_key_and_owner(self, _):
+        self.assertEqual(self.client.get(self.url + "/mapping").status_code, 404)
+        self.issue()
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(self.url + "/mapping").status_code, 403)
