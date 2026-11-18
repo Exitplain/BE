@@ -2,10 +2,17 @@ name: Deploy
 
 # 서버(EC2)에 main 브랜치를 배포한다 (운영 = main. develop 은 통합용이라 배포하지 않는다). SSH(22번 포트)는 쓰지 않고, AWS Systems Manager(SSM)로
 # 서버 안에서 deploy/deploy.sh 를 실행한다. AWS 자격 증명은 장기 키가 아니라 GitHub OIDC 로 임시 발급한다.
-# 처음에는 Actions 탭에서 직접 실행(workflow_dispatch)만 한다. main 이 기본 브랜치라 Run workflow 버튼이 나타난다.
-# 안정되면 아래 on: 블록에 workflow_run 을 추가해 CI 성공 뒤 자동 배포로 바꿀 수 있다 (deploy/CICD.md 참고).
+# 실행 방법 두 가지:
+#  1) 자동: main 에 push(머지)된 커밋의 CI 가 모두 성공하면 이어서 배포한다 (workflow_run).
+#     PR 이나 develop 의 CI 는 배포하지 않는다. CI 가 실패하면 배포하지 않는다.
+#  2) 수동: Actions 탭에서 Run workflow (workflow_dispatch). 자동 배포가 막혔을 때나 다시 배포할 때 쓴다.
+# 배포하면 서버가 마이그레이션을 적용하고 exitplain-web, exitplain-worker 를 재시작한다 (몇 초간 502, 실행 중인 테스트는 중단될 수 있다).
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
 
 concurrency:
   group: deploy-production
@@ -19,8 +26,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # main 브랜치에서만 실행한다 (AWS 역할의 신뢰 정책도 main 으로 제한한다)
-    if: github.ref == 'refs/heads/main'
+    # main 브랜치에서만 실행한다 (AWS 역할의 신뢰 정책도 main 으로 제한한다).
+    # 자동 실행(workflow_run)은 main 에 push 된 커밋의 CI 가 성공했을 때만 배포한다.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'))
     env:
       AWS_REGION: ap-northeast-2
       INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}

@@ -99,4 +99,4 @@ jobs:
         run: python manage.py migrate --noinput
 
       - name: 테스트 (PostgreSQL)
-        run: python manage.py test
+        run: python manage.py test -v 2
