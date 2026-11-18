@@ -38,12 +38,23 @@ class RunListQuerySerializer(serializers.Serializer):
     cursor = serializers.CharField(required=False, allow_blank=True, max_length=200, default="")
 
 
+class ReproduceSerializer(StrictSerializer):
+    """원인 재현 범위 (R09). 과업 1개 × 고른 세그먼트만, 시드는 계획보다 적게 돌릴 수 있다."""
+    task_id = serializers.CharField(max_length=80)
+    segment_ids = serializers.ListField(child=serializers.CharField(max_length=40), min_length=1, max_length=20)
+    stage_id = serializers.CharField(required=False, allow_blank=True, max_length=300, default="")
+    stage_name = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    seed_count = serializers.IntegerField(required=False, min_value=1, max_value=10, default=1)
+
+
 class RunCreateSerializer(StrictSerializer):
     plan_revision_id = serializers.UUIDField(error_messages={"required": "확정한 계획을 선택해주세요.",
                                                              "invalid": "계획 ID가 올바르지 않습니다."})
     base_run_id = serializers.UUIDField(required=False, allow_null=True, default=None,
                                         error_messages={"invalid": "실행 ID가 올바르지 않습니다."})
     change_note = serializers.CharField(required=False, allow_blank=True, max_length=500, default="", trim_whitespace=True)
+    # 있으면 원인 재현(cause_repro): base_run_id(비교한 사전 테스트)가 필요하고, 이 범위만 돌린다
+    reproduce = ReproduceSerializer(required=False, allow_null=True, default=None)
 
 
 class SessionListQuerySerializer(serializers.Serializer):

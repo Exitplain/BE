@@ -63,7 +63,7 @@ def _agent_persona(p, frustration_enabled):
     return persona
 
 
-def build_run_input(snapshot, *, run_id, task_id, seed=1):
+def build_run_input(snapshot, *, run_id, task_id, seed=1, segment_ids=None):
     """과업 1개·시드 1회의 RunInput dict. agent.schemas.RunInput으로 검증한 뒤 반환한다."""
     from agent.schemas import RunInput
 
@@ -90,7 +90,7 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         "goal": task["goal"],
         "success_path": task.get("success_path"),
         "success_criteria": task.get("success_criteria"),
-        "personas": [_agent_persona(p, frustration_enabled) for p in data["personas"]],
+        "personas": [_agent_persona(p, frustration_enabled) for p in _personas(data, segment_ids)],
         "max_steps": limits["max_steps"],
         "timeout_seconds": limits["timeout_seconds"],
         "concurrency": min(limits["concurrency"], 5),
@@ -109,7 +109,31 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1):
         raise RunInputError(f"에이전트 입력 규격과 맞지 않습니다: {exc}") from exc
 
 
-def build_run_inputs(snapshot, *, run_id):
-    """확정된 모든 과업 × 시드의 RunInput 목록. 순서: 과업 → 시드."""
-    return [build_run_input(snapshot, run_id=run_id, task_id=t["id"], seed=s)
-            for t in snapshot.data["tasks"] for s in range(1, snapshot.data["limits"]["seed_count"] + 1)]
+def _personas(data, segment_ids):
+    if not segment_ids:
+        return data["personas"]
+    chosen = [p for p in data["personas"] if p.get("segment_id") in set(segment_ids)]
+    if not chosen:
+        raise RunInputError("고른 세그먼트에 페르소나가 없습니다.")
+    return chosen
+
+
+def build_run_inputs(snapshot, *, run_id, scope=None):
+    """확정된 과업 × 시드의 RunInput 목록. 순서: 과업 → 시드.
+
+    scope(원인 재현): {"task_ids": [...], "segment_ids": [...], "seed_count": n} 로 일부만 돌린다.
+    없으면 계획 전체 (사전 테스트·재테스트).
+    """
+    scope = scope or {}
+    tasks = snapshot.data["tasks"]
+    if scope.get("task_ids"):
+        known = {t["id"] for t in tasks}
+        missing = [t for t in scope["task_ids"] if t not in known]
+        if missing:
+            raise RunInputError(f"확정된 과업이 아닙니다: {', '.join(missing)}")
+        tasks = [t for t in tasks if t["id"] in set(scope["task_ids"])]
+    seed_count = snapshot.data["limits"]["seed_count"]
+    if scope.get("seed_count"):
+        seed_count = min(seed_count, scope["seed_count"])
+    return [build_run_input(snapshot, run_id=run_id, task_id=t["id"], seed=s, segment_ids=scope.get("segment_ids"))
+            for t in tasks for s in range(1, seed_count + 1)]

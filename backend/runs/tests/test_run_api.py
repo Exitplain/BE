@@ -407,3 +407,38 @@ class TileStageFieldsTests(ApiBase):
         self.session("P-001", status="success", terminal_stage="detail", stages_reached=["landing", "browse", "detail"])
         item = self.client.get(f"/api/v1/runs/{self.run.id}/sessions").json()["items"][0]
         self.assertEqual((item["terminal_stage"], item["stages_reached"]), ("detail", ["landing", "browse", "detail"]))
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class CauseReproEndToEndTests(WizardMixin, TestCase):
+    """원인 재현 실행도 워커가 돌리고 리포트까지 만든다 (돌리지 않은 과업은 세션 0으로 남는다)."""
+    PLAN_SIZE = WizardMixin.FULL_SIZE
+
+    def test_repro_run_finishes_with_a_report(self, _):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        override = override_settings(ARTIFACT_ROOT=str(Path(tmp.name).resolve()),
+                                     AGENT_COMMAND=[sys.executable, FAKE_AGENT], EXITPLAIN_WORKER_PROCESSES=2)
+        override.enable()
+        self.addCleanup(override.disable)
+        patcher = patch("runs.netguard.resolve_host", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        snapshot_id = self.confirm()["plan_revision_id"]
+        base = Run.objects.create(project=self.project, created_by=self.user, sequence_no=1,
+                                  plan_snapshot_id=snapshot_id, status=Run.Status.COMPLETED)
+        res = self.client.post("/api/v1/runs", {
+            "plan_revision_id": snapshot_id, "base_run_id": str(base.id),
+            "reproduce": {"task_id": "order", "segment_ids": ["segment_2"], "stage_name": "장바구니"}}, format="json")
+        self.assertEqual(res.status_code, 202, res.content)
+        run_id = res.json()["run_id"]
+        Worker(tick=0.1, grace_seconds=30).run_once()
+
+        detail = self.client.get(f"/api/v1/runs/{run_id}").json()
+        self.assertEqual((detail["status"], detail["kind"]), ("completed", "cause_repro"))
+        self.assertEqual(detail["progress"]["finished_sessions"], 5)
+        report = self.client.get(f"/api/v1/runs/{run_id}/reports")
+        self.assertEqual(report.status_code, 200, report.content)
+        tasks = {t["task_id"]: t for t in report.json()["data"]["tasks"]}
+        self.assertEqual(tasks["order"]["journey_funnel"]["valid_sessions"] > 0, True)

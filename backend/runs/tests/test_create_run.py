@@ -231,3 +231,56 @@ class CancelTests(WizardMixin, TestCase):
         with self.assertRaises(ApiError) as ctx:
             services.request_cancel(run)
         self.assertEqual((ctx.exception.status_code, ctx.exception.code), (409, "RUN_NOT_ACTIVE"))
+
+
+class CauseReproTests(WizardMixin, TestCase):
+    """R09 원인 재현: 비교한 완료 실행을 기준으로 과업 1개 × 고른 세그먼트만 돌린다."""
+    PLAN_SIZE = WizardMixin.FULL_SIZE      # 세그먼트 4개 × 5명, 시드 3회
+
+    def setUp(self):
+        super().setUp()
+        # setUp 에서도 계획을 확정하므로 클래스 데코레이터가 아니라 여기서 patch 한다 (데코레이터는 test_* 에만 걸린다)
+        for patcher in (patch("discoveries.services.run_discovery", side_effect=fake_discovery),
+                        patch("runs.netguard.resolve_host", return_value=PUBLIC)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.snapshot_id = self.confirm()["plan_revision_id"]
+        self.base = Run.objects.create(project=self.project, created_by=self.user, sequence_no=1,
+                                       plan_snapshot_id=self.snapshot_id, status=Run.Status.COMPLETED)
+
+    def post(self, **body):
+        return self.client.post("/api/v1/runs", {"plan_revision_id": self.snapshot_id, **body}, format="json")
+
+    def test_runs_only_the_chosen_task_segments_and_seeds(self):
+        res = self.post(base_run_id=str(self.base.id), change_note="원인 재현 · 장바구니",
+                        reproduce={"task_id": "order", "segment_ids": ["segment_1", "segment_3"],
+                                   "stage_id": "/cart", "stage_name": "장바구니"})
+        self.assertEqual(res.status_code, 202, res.content)
+        run = Run.objects.get(pk=res.json()["run_id"])
+        self.assertEqual((run.kind, run.parent_run, run.name), ("cause_repro", self.base, "원인 재현"))
+        task_runs = list(TaskRun.objects.filter(run=run))
+        self.assertEqual([(t.task_key, t.seed) for t in task_runs], [("order", 1)])   # 시드 기본 1회
+        personas = task_runs[0].input_json["personas"]
+        self.assertEqual(len(personas), 10)
+        self.assertEqual(run.config["expected_sessions"], 10)
+        self.assertEqual(run.config["reproduce"]["stage_name"], "장바구니")
+
+    def test_seed_count_is_capped_by_the_plan(self):
+        res = self.post(base_run_id=str(self.base.id),
+                        reproduce={"task_id": "coupon", "segment_ids": ["segment_2"], "seed_count": 9})
+        self.assertEqual(res.status_code, 202, res.content)
+        self.assertEqual(TaskRun.objects.filter(run_id=res.json()["run_id"]).count(), 3)
+
+    def test_needs_finished_base_run_and_known_task_and_segment(self):
+        scope = {"task_id": "order", "segment_ids": ["segment_1"]}
+        self.assertEqual(self.post(reproduce=scope).json()["error"]["code"], "INVALID_BASE_RUN")
+        bad_task = self.post(base_run_id=str(self.base.id), reproduce={**scope, "task_id": "nope"})
+        self.assertEqual((bad_task.status_code, bad_task.json()["error"]["code"]), (422, "RUN_INPUT_INVALID"))
+        bad_seg = self.post(base_run_id=str(self.base.id), reproduce={**scope, "segment_ids": ["segment_9"]})
+        self.assertEqual(bad_seg.json()["error"]["code"], "RUN_INPUT_INVALID")
+        self.assertEqual(self.post(base_run_id=str(self.base.id), reproduce={**scope, "x": 1}).status_code, 422)
+        self.assertEqual(Run.objects.count(), 1)
+
+    def test_without_reproduce_a_base_run_still_means_retest(self):
+        res = self.post(base_run_id=str(self.base.id))
+        self.assertEqual(Run.objects.get(pk=res.json()["run_id"]).kind, "retest")
