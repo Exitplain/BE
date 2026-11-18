@@ -1,0 +1,17 @@
+[Unit]
+Description=Exitplain static preview (received code, 127.0.0.1 only)
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/exitplain/BE/backend
+EnvironmentFile=/srv/exitplain/.env
+Environment=PYTHONPATH=/srv/exitplain/BE
+# 받은 정적 사이트를 127.0.0.1:8090 에서만 내보낸다 (EXITPLAIN_PREVIEW_BIND·_PORT). nginx 로 외부에 열지 않는다.
+ExecStart=/srv/exitplain/venv/bin/python manage.py serve_previews
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

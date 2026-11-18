@@ -24,6 +24,9 @@ class Discovery(models.Model):
     project = models.ForeignKey(settings.EXITPLAIN_PROJECT_MODEL, on_delete=models.CASCADE, related_name="discoveries")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     entry_url = models.URLField(max_length=500)
+    # 코드로 확인한 경우 받은 스냅샷 (entry_url 은 그 미리보기 주소). URL 로 확인했으면 비어 있다
+    source_snapshot = models.ForeignKey("sources.SourceSnapshot", null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name="discoveries")
     login_mode = models.CharField(max_length=16, choices=LoginMode.choices, default=LoginMode.NONE)
     variant = models.CharField(max_length=16)          # 데모 쇼핑몰 버전 fixed/problem
     features = models.JSONField(default=list)          # [{id, name, evidence, verification}]

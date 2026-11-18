@@ -1,3 +1,6 @@
+from .services import previewable
+
+
 def snapshot_dict(s):
     """서버 경로는 내보내지 않는다. 라우트·이동의 file:line 은 받은 코드 기준 상대 경로."""
     c = s.connection
@@ -10,6 +13,8 @@ def snapshot_dict(s):
         "framework": s.framework, "analysis": s.analysis, "progress": s.progress,
         "error": {"code": s.error_code, "message": s.error_message} if s.error_code else None,
         "files_available": s.files_deleted_at is None and s.state == s.State.READY,
+        # URL 없이 사이트 확인·실행할 수 있으면 true (정적 사이트 미리보기). 미리보기 주소는 서버 안에서만 열려 내보내지 않는다
+        "previewable": previewable(s),
         "created_at": s.created_at.isoformat(), "updated_at": s.updated_at.isoformat(),
     }
 
