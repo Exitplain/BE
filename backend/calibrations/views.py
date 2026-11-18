@@ -44,6 +44,14 @@ def _days(request):
     return days
 
 
+def _strength(raw):
+    if raw in (None, ""):
+        return "normal"
+    if raw not in proposal.STRENGTHS:
+        raise ApiError(422, "VALIDATION_ERROR", "strength 는 normal 또는 gentle 입니다.", {"strength": ["normal, gentle"]})
+    return raw
+
+
 def _expected(request, revision):
     expected = request.data.get("expected_revision")
     if isinstance(expected, bool) or not isinstance(expected, int):
@@ -77,7 +85,7 @@ class ProposalView(BaseAPIView):
 
     def get(self, request, project_id):
         project = get_owned_project(request.user, project_id)
-        return Response(proposal.build(project, _days(request)))
+        return Response(proposal.build(project, _days(request), _strength(request.query_params.get("strength"))))
 
 
 class CalibrationListView(BaseAPIView):
@@ -106,7 +114,9 @@ class CalibrationListView(BaseAPIView):
         days = request.data.get("days", 7)
         if days not in (7, 14, 30):
             raise ApiError(422, "VALIDATION_ERROR", "days 는 7, 14, 30 중 하나입니다.", {"days": ["7, 14, 30"]})
-        built = proposal.build(project, days)
+        built = proposal.build(project, days, _strength(request.data.get("strength")))
+        if built.get("provisional"):
+            raise ApiError(422, "PROVISIONAL", built.get("message") or "아직 임시값이라 적용할 수 없어요.")
         by_key = {item["key"]: item for item in built["items"]}
         missing = sorted(set(keys) - set(by_key))
         if missing:
