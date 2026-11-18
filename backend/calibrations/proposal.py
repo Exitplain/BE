@@ -78,7 +78,7 @@ def _bounds(kind):
     return cal.THRESHOLD_RANGE if kind == "threshold" else cal.WEIGHT_RANGE
 
 
-MIN_EVIDENCE = 10          # 실측 첫 단계 세션 또는 보정용 사람 관측이 이만큼 모여야 실제 조정안 (그 전에는 임시값)
+MIN_EVIDENCE = 10          # 실측 첫 단계 세션 + 보정용 사람 관측 합이 이만큼 모여야 실제 조정안 (그 전에는 임시값)
 HUMAN_K = 0.10             # 사람 관측 근거는 실측보다 작게 조정한다
 HUMAN_PICK_SHARE = 0.30    # 이 비율 이상이 고른 화면은 "사람에게 불편한 화면"
 HUMAN_QUIET_SHARE = 0.10   # 모델 마찰 상위 화면인데 이 비율 미만만 골랐으면 "모델이 과하게 본 화면"
@@ -135,7 +135,8 @@ def _from_measurement(report, funnel, collector):
                            f"{where} 화면에서 가장 많이 겪은 마찰이 {CAUSES[cause]}이에요")
     errors = [t["mean_error"] for t in tasks if t["mean_error"] is not None]
     return {
-        "evidence": "measurement", "count": max((t["base_sessions"] for t in tasks), default=0),
+        # 근거 수는 비교 단계가 아직 없어도 첫 단계에 온 실측 세션으로 센다
+        "evidence": "measurement", "count": max((t["base_sessions"] for t in funnel["tasks"]), default=0),
         "mean_error": round(sum(errors) / len(errors), 1) if errors else None,
         "gaps": [{"task_id": t["task_id"], "task_name": t["name"], "stage_id": st["id"], "stage_name": st["name"],
                   "error": st["error"], "actual": st["actual"]["rate"], "low": st["predicted"]["low"],
@@ -189,8 +190,8 @@ def _from_observations(project, collector):
 def build(project, days=7, strength="normal"):
     """{available, provisional, reason?, message?, base_revision, basis, items}
 
-    근거 우선순위: 실측(10세션 이상) > 사람 관측(보정용 10명 이상) > 실측 임시값 > 사람 관측 임시값.
-    10 미만이면 provisional=True 로 조정안을 보여 주되 적용은 막는다.
+    근거는 실측 세션 + 보정용 사람 관측을 합쳐 센다. 합이 10 미만이면 provisional=True 로 조정안을 보여 주되 적용은 막는다.
+    조정은 두 근거의 배율을 곱해 합친다.
     """
     revision, params = current(project)
     collector = _Collector(STRENGTHS.get(strength, 1.0))
@@ -215,25 +216,39 @@ def build(project, days=7, strength="normal"):
     observed = _Collector(collector.strength)
     human = _from_observations(project, observed)
 
-    candidates = []
-    if measured:
-        measured_basis = _from_measurement(report, measured[0], measured[1])
-        candidates.append((measured_basis["count"] >= MIN_EVIDENCE, 0, measured_basis, measured[1]))
-    if human["count"]:
-        candidates.append((human["count"] >= MIN_EVIDENCE, 1, human, observed))
-    if not candidates:
+    # 근거는 합쳐서 센다: 실측 세션 + 보정용 사람 관측 (팀 결정: 사람 관측으로 모자란 실측을 채울 수 있다)
+    measured_basis = _from_measurement(report, measured[0], measured[1]) if measured else None
+    m_count = measured_basis["count"] if measured_basis else 0
+    h_count = human["count"]
+    total = m_count + h_count
+    if total == 0:
         reason = "NOT_CONNECTED" if site is None else "NOT_MAPPED" if not site.mapping_saved_at else "NO_EVIDENCE"
         return {**out, "available": False, "reason": reason,
                 "message": "실측을 연결하거나, 참여자 응답 링크로 사람 관측을 모아 주세요. "
-                           f"{MIN_EVIDENCE}명(세션)부터 실제 조정안을 만들어요."}
-    enough, _, basis, chosen = sorted(candidates, key=lambda c: (not c[0], c[1]))[0]
-    items = chosen.items(params)
+                           f"실측 세션과 사람 관측을 합쳐 {MIN_EVIDENCE}건부터 실제 조정안을 만들어요."}
+    merged = _Collector(collector.strength)
+    for part in ([measured[1]] if m_count else []) + ([observed] if h_count else []):
+        for key, factor in part.factors.items():
+            merged.factors[key] = merged.factors.get(key, 1.0) * factor
+            name, why = part.reasons[key]
+            merged.reasons.setdefault(key, (name, []))[1].extend(why)
+    items = merged.items(params)
+    evidence = "mixed" if m_count and h_count else "measurement" if m_count else "observations"
+    basis = {
+        "evidence": evidence, "count": total, "measurement_count": m_count, "observation_count": h_count,
+        "mean_error": measured_basis["mean_error"] if measured_basis else None,
+        "gaps": measured_basis["gaps"] if measured_basis else [],
+        "picks": human.get("picks", []),
+    }
+    enough = total >= MIN_EVIDENCE
     out.update(provisional=not enough, items=items, basis={
         "report_id": str(report.id), "run_sequence": report.run.sequence_no if report.run_id else None,
         "days": days, "device": "all", **basis})
     if not enough:
-        out["message"] = (f"지금은 {basis['count']}{'세션' if basis['evidence'] == 'measurement' else '명'}이라 임시값이에요. "
-                          f"{MIN_EVIDENCE}{'세션' if basis['evidence'] == 'measurement' else '명'}부터 실제 값으로 바뀌고 적용할 수 있어요.")
+        parts = " + ".join(x for x in (f"실측 {m_count}세션" if m_count else "",
+                                       f"사람 관측 {h_count}명" if h_count else "") if x)
+        out["message"] = (f"지금은 {parts}(합 {total}건)이라 임시값이에요. "
+                          f"합쳐서 {MIN_EVIDENCE}건부터 실제 값으로 바뀌고 적용할 수 있어요.")
     if not items:
         return {**out, "available": True, "reason": "NO_GAP",
                 "message": out.get("message") or "모든 단계가 예측과 맞아 바꿀 값이 없어요."}

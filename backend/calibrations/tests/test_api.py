@@ -396,3 +396,34 @@ class HumanProposalTests(WizardMixin, TestCase):
         body = self.client.get(f"{self.url}/calibration/proposal").json()
         self.assertEqual((body["available"], body["reason"]), (False, "NOT_CONNECTED"))
         self.assertIn("참여자 응답 링크", body["message"])
+
+
+@patch("calibrations.observations._screens_by_task", return_value=SCREENS)
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class CombinedEvidenceTests(WizardMixin, TestCase):
+    """실측 세션 + 보정용 사람 관측을 합쳐 10건부터 실제 조정안 (사람 관측으로 모자란 실측을 채운다)."""
+
+    def setUp(self):
+        super().setUp()
+        self.project.entry_url = "https://shop.example.com/"
+        self.project.save()
+        self.url = f"/api/v1/projects/{self.project.id}"
+
+    def test_three_sessions_plus_seven_people_is_enough(self, *_):
+        ObservationTests.report(self)
+        site = MeasureSite.objects.create(project=self.project)
+        MeasureHit.objects.bulk_create([MeasureHit(site=site, sid=f"s{i:05d}abc", path="/") for i in range(3)])
+        self.client.put(f"{self.url}/measurement/mapping", {"mapping": {}}, format="json")
+        HumanProposalTests.observe(self, 4, "/", "value")
+        first = self.client.get(f"{self.url}/calibration/proposal").json()
+        self.assertEqual((first["provisional"], first["basis"]["evidence"], first["basis"]["count"]),
+                         (True, "mixed", 7))
+        self.assertIn("실측 3세션 + 사람 관측 4명(합 7건)", first["message"])
+        HumanProposalTests.observe(self, 3, "/", "value", start=4)
+        body = self.client.get(f"{self.url}/calibration/proposal").json()
+        self.assertEqual((body["provisional"], body["basis"]["measurement_count"], body["basis"]["observation_count"]),
+                         (False, 3, 7))
+        keys = [i["key"] for i in body["items"]]
+        self.assertIn("*.weight.value", keys)
+        res = self.client.post(f"{self.url}/calibrations", {"expected_revision": 0, "keys": keys}, format="json")
+        self.assertEqual(res.status_code, 201, res.content)
