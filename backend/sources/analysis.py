@@ -6,8 +6,6 @@
 import json
 from pathlib import Path
 
-from agent.source.extract_routes import extract
-
 ROUTE_LIMIT = 200
 EDGE_LIMIT = 500
 BUILT_DIRS = ("dist", "build", "out")   # 빌드 결과물로 흔히 쓰는 폴더 (public 은 원본 템플릿이라 넣지 않는다)
@@ -31,6 +29,9 @@ def runnable(root):
 
 def analyze(root):
     """저장할 분석 요약. 경로는 모두 root 기준 상대 경로."""
+    # agent 패키지는 레포 루트에 있어 PYTHONPATH 가 필요하다. 다른 앱처럼 쓸 때 불러와,
+    # PYTHONPATH 없이 도는 manage.py(migrate·check)가 URL 을 불러오다 멈추지 않게 한다.
+    from agent.source.extract_routes import extract
     out = extract(Path(root))
     framework = out["framework"]
     kind, static_root = runnable(root)

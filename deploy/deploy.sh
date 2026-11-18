@@ -21,6 +21,8 @@ set -a
 # shellcheck disable=SC1091
 source "$APP_ROOT/.env"
 set +a
+# agent 패키지는 레포 루트에 있다 (systemd 서비스와 같은 값)
+export PYTHONPATH="$REPO"
 
 cd backend
 "$VENV/bin/python" manage.py migrate --noinput
