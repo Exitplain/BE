@@ -196,6 +196,7 @@ class MappingTests(MeasureHelpers, TestCase):
         self.assertEqual(rows["/faq"], (None, True))
         self.assertEqual(rows["/cart"], ("/cart", False))      # 저장 안 한 행은 계속 추천값
         self.assertIsNotNone(res.json()["saved_at"])
+        self.assertIsNotNone(self.client.get(self.url).json()["mapping_saved_at"])
 
     def test_rejects_unknown_stage_and_extra_fields(self, _):
         self.report()

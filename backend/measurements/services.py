@@ -132,6 +132,7 @@ def status_dict(request, project, site):
         "key": None, "snippet": None,
         "installed": False, "last_received_at": None, "last_origin": None,
         "sessions_24h": 0, "events_24h": 0,
+        "mapping_saved_at": None,          # R05 매핑을 한 번이라도 저장했으면 실측 퍼널·비교 화면으로 간다
     }
     if not out["available"]:
         out["reason"] = "NOT_DEPLOYED"
@@ -147,6 +148,7 @@ def status_dict(request, project, site):
         "last_origin": site.last_origin or None,
         "sessions_24h": recent.values("sid").distinct().count(),
         "events_24h": recent.count(),
+        "mapping_saved_at": site.mapping_saved_at.isoformat() if site.mapping_saved_at else None,
     })
     return out
 
