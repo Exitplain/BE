@@ -254,6 +254,7 @@ class FunnelTests(MeasureHelpers, TestCase):
         self.assertAlmostEqual(rows["/cart"]["error"], round(30 - (low + high) / 2, 1), places=1)
         self.assertEqual(task["max_drop"]["actual"]["label"], "상품 상세→장바구니")
         self.assertIsNotNone(task["mean_error"])
+        self.assertEqual((rows["/"]["error"], rows["/"]["compared"], task["compared_stages"]), (None, False, 3))
 
         mobile = self.client.get(self.url + "/funnel?days=7&device=mobile").json()["tasks"][0]
         self.assertIsNone({r["id"]: r for r in mobile["stages"]}["/cart"]["actual"])   # 장바구니는 데스크톱만 왔다

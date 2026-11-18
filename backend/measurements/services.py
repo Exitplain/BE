@@ -255,7 +255,7 @@ def save_mapping(project, site, mapping):
 # - 실측 도달률 = 그 단계에 온 세션 ÷ 첫 단계에 온 세션 (순서를 엄격히 따지지 않는다: 예측 rate_of_valid 와 같은 방식)
 # - 예측 범위 = 예측 도달 세션/유효 세션 비율의 Wilson 95% 구간 (페르소나 수가 적을수록 넓어진다)
 # - 오차 = 실측 − 범위 중앙값, 실측이 범위 밖이면 차이 구간
-# - 매핑이 없는 단계는 실측 null (평균 오차·차이 구간에서 뺀다)
+# - 매핑이 없는 단계는 실측 null, 첫 단계는 기준(100%)이라 평균 오차·차이 구간에서 뺀다
 
 MIN_SAMPLE = 100          # 첫 단계 세션이 이보다 적으면 "수집 중" (비교는 보여주되 표본 부족으로 표시)
 DEVICES = ("all", "mobile", "desktop")
@@ -306,20 +306,23 @@ def _task_compare(task, by_stage):
     stages = funnel.get("stages") or []
     base = len(by_stage.get(stages[0]["path"], ())) if stages else 0
     rows = []
-    for stage in stages:
+    for index, stage in enumerate(stages):
         band = wilson(stage.get("reached") or 0, valid)
         sessions = len(by_stage[stage["path"]]) if stage["path"] in by_stage else None
         actual = sessions / base * 100 if sessions is not None and base else None
         low, high = (band if band else (None, None))
         mid = (low + high) / 2 if band else None
-        error = actual - mid if actual is not None and mid is not None else None
+        # 첫 단계는 실측 도달률의 기준(항상 100%)이라 비교하지 않는다 (Figma R08 도 둘째 단계부터)
+        compared = index > 0 and actual is not None and band is not None
+        error = actual - mid if compared else None
         rows.append({
             "id": stage["path"], "name": stage.get("name") or stage["path"], "is_goal": bool(stage.get("is_goal")),
             "predicted": {"low": _pct(low), "high": _pct(high), "mid": _pct(mid),
                           "reached": stage.get("reached") or 0, "valid": valid},
             "actual": None if sessions is None else {"sessions": sessions, "rate": _pct(actual)},
             "error": _pct(error),
-            "gap": actual is not None and band is not None and not (low <= actual <= high),
+            "gap": compared and not (low <= actual <= high),
+            "compared": compared,
             "short_sample": sessions is not None and sessions < MIN_SAMPLE,
         })
     errors = [abs(r["error"]) for r in rows if r["error"] is not None]
@@ -330,6 +333,7 @@ def _task_compare(task, by_stage):
         "base_sessions": base, "collecting": base < MIN_SAMPLE,
         "stages": rows,
         "mapped_stages": sum(1 for r in rows if r["actual"] is not None),
+        "compared_stages": sum(1 for r in rows if r["compared"]),
         "mean_error": _pct(sum(errors) / len(errors)) if errors else None,
         "gaps": [r["id"] for r in rows if r["gap"]],
         "max_drop": {"predicted": predicted_drop, "actual": actual_drop,
