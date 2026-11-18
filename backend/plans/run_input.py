@@ -53,11 +53,22 @@ def _target_url(site, task):
 VARIABLE_KEYS = ("patience", "digital_literacy", "price_sensitivity", "trust_need")
 
 
+def required_field_limit(variables):
+    """참고 넘어갈 필수 입력칸 수. 인내심이 높고 신뢰 요구가 낮을수록 많이 참는다 (4~6칸, 가설값).
+
+    예전에는 모든 페르소나가 6칸이라, 지역 조회처럼 4~5칸을 먼저 요구하는 화면에서 아무도 부담을 느끼지 않았다.
+    """
+    patience = variables.get("patience", 50)
+    trust_need = variables.get("trust_need", 50)
+    return max(4, min(6, round(3 + 2 * patience / 100 + (100 - trust_need) / 100)))
+
+
 def _agent_persona(p, frustration_enabled):
     """스냅샷 페르소나 → agent.schemas.Persona. 수치 4개는 에이전트가 이탈 판정에 직접 쓴다 (agent/behavior.py)."""
     variables = p.get("variables") or {}
     persona = {"id": p["code"], "context": p["context"],
-               **{k: int(variables[k]) for k in VARIABLE_KEYS if k in variables}}
+               **{k: int(variables[k]) for k in VARIABLE_KEYS if k in variables},
+               "max_required_fields": required_field_limit(variables)}
     if not frustration_enabled:
         persona["frustration_threshold"] = NO_DROPOUT_THRESHOLD
     return persona

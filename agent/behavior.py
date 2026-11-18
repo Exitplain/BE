@@ -3,7 +3,8 @@
 점수 Fₜ = max(0, 0.85·Fₜ₋₁ + (아래 7가지 원인의 이번 화면 기여) − 4·새 단계 도착)
 점수가 임계치 이상이면 가상 이탈. 계수는 사람 데이터로 보정하지 않은 가설값이다.
 
-수치(0~100)는 배율 f(x) = 0.5 + x/100 (0 → 0.5배, 50 → 1배, 100 → 1.5배)로 쓴다.
+수치(0~100)는 배율 f(x) = 0.25 + 1.5·x/100 (0 → 0.25배, 50 → 1배, 100 → 1.75배)로 쓴다.
+(v3: 0.5~1.5배에서 넓혔다. 유형 사이 차이가 작아 문제 버전에서도 대부분 버티던 것을 줄이려는 가설값)
 - 인내심(patience) 높음 → 임계치가 높아져 늦게 이탈
 - 신뢰 요구(trust_need) 높음 → 필수 입력(개인정보) 부담이 커짐
 - 가격 민감도(price_sensitivity) 높음 → 뒤늦게 나온 배송비·수수료에 크게 반응
@@ -14,7 +15,8 @@
 - navigation 탐색 실패: 같은 단계에서 스크롤·뒤로가기 반복, 앞 단계로 되돌아감 (숙련도 낮을수록)
 - cost 비용 충격: 앞 단계에서 안 보이던 배송비·수수료가 장바구니 이후에 나타남 (가격 민감도)
 - value 가치 불명확: 상세 화면에 가격이 보이지 않음 (가격 민감도)
-- trust 신뢰 부족: 결제 전 단계에서 연락처·생년월일 같은 개인정보를 먼저 요구함 (신뢰 요구)
+- trust 신뢰 부족: 장바구니에 담기 전(아직 살 마음을 정하기 전)에 연락처·생년월일 같은 개인정보를 먼저 요구함 (신뢰 요구)
+  결제 단계라도 장바구니를 거치지 않았으면 센다 (예: 주소에 delivery 가 들어 결제로 분류된 배송 지역 조회 화면)
 - technical 기술 오류·지연: 행동 후 화면이 3초 넘게 걸리거나 오류 문구가 보임 (인내심 낮을수록)
 - accessibility 접근성 장벽: 이름 없는 입력칸, 모바일에서 24px보다 작은 버튼이 2개 이상 (숙련도 낮을수록)
 모든 수치가 50(기본값)이고 seed가 0이면 예전 규칙(필수 입력 초과 시 +70, 임계치 60)과 같은 결과가 나온다.
@@ -48,8 +50,11 @@ SLOW_SECONDS = 3.0
 SMALL_TARGET_PX = 24
 
 
+SLOPE = 1.5        # 수치 100 차이가 배율 몇 배 차이인지 (보정 K01 의 '기울기')
+
+
 def factor(value):
-    return 0.5 + value / 100
+    return 1 + SLOPE * (value - 50) / 100
 
 def sample_persona(persona, rng):
     """같은 세그먼트 안에서도 사람마다 조금씩 다르다: 수치 4개를 평균 그대로, 표준편차 VARIABLE_SD로 뽑는다."""
@@ -107,7 +112,8 @@ class PersonaMeter:
             signals["navigation"] = signals.get("navigation", 0) + self.weights["revisit"]
         if stage == "detail" and not PRICE_TEXT.search(text or "") and "value" not in self.fired:
             signals["value"] = self.weights["value"]
-        if stage not in {"payment", "complete"} and "trust" not in self.fired and _asks_sensitive(elements):
+        committed = "cart" in self.stages and stage in {"payment", "complete"}
+        if not committed and stage != "complete" and "trust" not in self.fired and _asks_sensitive(elements):
             signals["trust"] = self.weights["trust"]
         if "technical" not in self.fired and (wait_seconds > SLOW_SECONDS or ERROR_TEXT.search(text or "")):
             signals["technical"] = self.weights["technical"]

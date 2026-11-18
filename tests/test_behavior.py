@@ -25,17 +25,17 @@ def test_default_matches_old_rule():
 
 
 def test_patience_and_trust_change_outcome():
-    assert drop_step(Persona(id="a", patience=100)) is None          # 임계치 90 > 66
-    assert drop_step(Persona(id="a", patience=100, trust_need=100)) == 0   # 입력 부담 105 − 4
-    assert drop_step(Persona(id="a", trust_need=0)) is None            # 입력 부담 35 − 4
+    assert drop_step(Persona(id="a", patience=100)) is None          # 임계치 105 > 66
+    assert drop_step(Persona(id="a", patience=100, trust_need=100)) == 0   # 입력 부담 122.5 − 4
+    assert drop_step(Persona(id="a", trust_need=0)) is None            # 입력 부담 17.5 − 4
 
 
 def test_late_cost_only_counts_when_not_shown_early():
-    sensitive = Persona(id="a", price_sensitivity=100, patience=0)    # 비용 60, 임계치 30
+    sensitive = Persona(id="a", price_sensitivity=100, patience=0)    # 비용 70, 임계치 15
     late = PersonaMeter(sensitive)
     late.observe("detail", 0, "반찬 식탁")
     point = late.observe("payment", 0, "배송비 3,500원이 추가됩니다.")
-    assert point["signals"] == {"cost": 60.0} and point["crossed"] and late.primary_cause() == "cost"
+    assert point["signals"] == {"cost": 70.0} and point["crossed"] and late.primary_cause() == "cost"
     early = PersonaMeter(sensitive)
     early.observe("detail", 0, "배송비 회당 3,500원")
     assert early.observe("payment", 0, "배송비 3,500원이 추가됩니다.")["signals"] == {}
@@ -102,7 +102,10 @@ def test_value_trust_technical_accessibility_signals():
     assert "value" in meter.observe("detail", 0, "오늘의 반찬 식탁")["signals"]                  # 가격 없음
     assert "value" not in PersonaMeter(Persona(id="a")).observe("detail", 0, "12,900원")["signals"]
     assert "trust" in PersonaMeter(Persona(id="a")).observe("signup", 0, elements=[field("휴대폰 번호")])["signals"]
-    assert "trust" not in PersonaMeter(Persona(id="a")).observe("payment", 0, elements=[field("휴대폰 번호")])["signals"]
+    after_cart = PersonaMeter(Persona(id="a"))
+    after_cart.observe("cart", 0)
+    assert "trust" not in after_cart.observe("payment", 0, elements=[field("휴대폰 번호")])["signals"]   # 주문 중 연락처는 정상
+    assert "trust" in PersonaMeter(Persona(id="a")).observe("payment", 0, elements=[field("휴대폰 번호")])["signals"]  # 담기 전 조회
     assert "technical" in PersonaMeter(Persona(id="a")).observe("browse", 0, wait_seconds=4.2)["signals"]
     assert "technical" in PersonaMeter(Persona(id="a")).observe("browse", 0, "일시적인 오류가 발생했습니다")["signals"]
     unlabeled = [field(), field()]
@@ -113,9 +116,9 @@ def test_value_trust_technical_accessibility_signals():
 
 
 def test_each_cause_counted_once_and_primary_cause():
-    meter = PersonaMeter(Persona(id="a", trust_need=100, patience=0))   # 신뢰 45, 임계치 30
+    meter = PersonaMeter(Persona(id="a", trust_need=100, patience=0))   # 신뢰 52.5, 임계치 15
     first = meter.observe("signup", 0, elements=[field("생년월일")])
-    assert first["signals"] == {"trust": 45.0} and first["crossed"] and meter.primary_cause() == "trust"
+    assert first["signals"] == {"trust": 52.5} and first["crossed"] and meter.primary_cause() == "trust"
     assert meter.observe("signup", 0, elements=[field("생년월일")])["signals"] == {}
 
 
