@@ -48,6 +48,33 @@ class MeasurementView(BaseAPIView):
         return Response(services.status_dict(request, project, site))
 
 
+class MeasurementMappingView(BaseAPIView):
+    """GET·PUT /api/v1/projects/{id}/measurement/mapping — 실측 단계 → 예측 퍼널 단계 (R05)
+
+    GET: 최근 7일 단계마다 저장한 매핑(없으면 자동 추천: 경로가 같으면 exact, 비슷하면 similar)
+    PUT {"mapping": {step_id: stage_id | null}} — 통째로 바꾼다
+    """
+
+    def _site(self, project):
+        site = services.site_for(project)
+        if site is None:
+            raise ApiError(404, "NOT_FOUND", "아직 수집 스크립트를 발급하지 않았어요.")
+        return site
+
+    def get(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        return Response(services.mapping_dict(project, self._site(project)))
+
+    def put(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        site = self._site(project)
+        unknown = sorted(set(request.data) - {"mapping"})
+        if unknown:
+            raise ApiError(422, "VALIDATION_ERROR", "허용하지 않는 필드입니다.",
+                           {k: ["허용하지 않는 필드입니다."] for k in unknown})
+        return Response(services.save_mapping(project, site, request.data.get("mapping")))
+
+
 class MeasurementStepsView(BaseAPIView):
     """GET /api/v1/projects/{id}/measurement/steps?days=7 — 경로·단계별 고유 세션 수 (R05)"""
 

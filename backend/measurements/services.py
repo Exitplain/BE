@@ -1,4 +1,4 @@
-"""실측 수집 (R01~R05 의 바탕): 키 발급, 수집 받기, 설치 확인, 경로별 집계.
+"""실측 수집 (R01~R05): 키 발급, 수집 받기, 설치 확인, 경로별 집계, 단계 매핑.
 
 받는 쪽 원칙
 - 키는 공개 값이라 Origin 이 프로젝트 허용 출처와 같을 때만 받는다.
@@ -15,7 +15,10 @@ from django.core.cache import cache
 from django.db.models import Count
 from django.utils import timezone
 
+from common.exceptions import ApiError
 from common.projects import project_target
+from reports.journey import screen_id
+from reports.models import ReportSnapshot
 
 from .models import MeasureHit, MeasureSite
 
@@ -41,11 +44,9 @@ def normalize_path(raw):
     if not isinstance(raw, str) or not raw.startswith("/"):
         return None
     path = raw.split("?", 1)[0].split("#", 1)[0]
-    parts = [":id" if PRIVATE_SEGMENT.search(p) else p for p in path.split("/")]
-    path = "/".join(parts)
-    if len(path) > 1:
-        path = path.rstrip("/") or "/"
-    return path[:MAX_PATH]
+    path = "/".join(":id" if PRIVATE_SEGMENT.search(p) else p for p in path.split("/"))
+    # 에이전트 실행 퍼널과 같은 단계 ID 규칙 (소문자, 상품 12번·34번 → /product/:id). 그래야 매핑을 자동으로 맞출 수 있다
+    return screen_id(path)[:MAX_PATH]
 
 
 def parse(body):
@@ -153,3 +154,84 @@ def steps(site, days):
         "items": [{"step_id": r["step"] or r["path"], "path": r["path"], "step": r["step"] or None,
                    "sessions": r["sessions"], "events": r["events"]} for r in rows],
     }
+
+
+# ---------- R05 단계 매핑: 실측 경로(단계 ID) → 사전 테스트(예측) 실행 퍼널 단계 ----------
+
+MAPPING_DAYS = 7
+
+
+def latest_report(project):
+    """이 프로젝트의 가장 최근 예측 리포트 (실행 퍼널 단계의 기준)."""
+    return (ReportSnapshot.objects.filter(plan_snapshot__plan__project=project)
+            .order_by("-created_at", "-revision").first())
+
+
+def prediction_stages(report):
+    """리포트의 과업별 실행 퍼널 단계를 하나로 모은다. 같은 화면 경로는 한 단계 (과업 이름을 함께 남긴다)."""
+    stages, seen = [], {}
+    for task in (report.data.get("tasks") or []) if report else []:
+        for stage in (task.get("journey_funnel") or {}).get("stages", []):
+            sid = stage["path"]
+            if sid not in seen:
+                seen[sid] = {"id": sid, "name": stage.get("name") or sid, "is_goal": bool(stage.get("is_goal")),
+                             "tasks": []}
+                stages.append(seen[sid])
+            seen[sid]["tasks"].append(task.get("name") or task.get("task_id"))
+    return stages
+
+
+def _loose(path):
+    """이름 유사 비교용: 끝의 s(복수형)·하이픈·밑줄 차이를 무시한다 (/products ≈ /product)."""
+    return "/".join(p.replace("-", "").replace("_", "").rstrip("s") for p in path.split("/"))
+
+
+def suggest(step_id, stage_ids):
+    if step_id in stage_ids:
+        return step_id, "exact"
+    loose = {_loose(s): s for s in stage_ids}
+    if step_id.startswith("/") and _loose(step_id) in loose:
+        return loose[_loose(step_id)], "similar"
+    return None, None
+
+
+def mapping_dict(project, site):
+    report = latest_report(project)
+    stages = prediction_stages(report)
+    stage_ids = [s["id"] for s in stages]
+    counts = {r["step_id"]: r for r in steps(site, MAPPING_DAYS)["items"]}
+    saved = site.mapping or {}
+    rows = []
+    for step_id in list(counts) + [k for k in saved if k not in counts]:
+        suggested, why = suggest(step_id, stage_ids)
+        has_saved = step_id in saved
+        stage_id = saved[step_id] if has_saved else suggested
+        if stage_id is not None and stage_id not in stage_ids:
+            stage_id = None                                   # 새 리포트에서 사라진 단계
+        rows.append({"step_id": step_id, "sessions": counts.get(step_id, {}).get("sessions", 0),
+                     "events": counts.get(step_id, {}).get("events", 0),
+                     "stage_id": stage_id, "suggested_stage_id": suggested, "suggestion": why, "saved": has_saved})
+    out = {"project_id": project.pk, "days": MAPPING_DAYS,
+           "report_id": str(report.id) if report else None, "stages": stages, "rows": rows,
+           "mapped": sum(1 for r in rows if r["stage_id"]), "saved_at": site.mapping_saved_at.isoformat()
+           if site.mapping_saved_at else None}
+    if report is None:
+        out.update({"reason": "NO_PREDICTION", "message": "먼저 사전 테스트를 한 번 실행해야 비교할 단계가 생겨요."})
+    return out
+
+
+def save_mapping(project, site, mapping):
+    """{step_id: stage_id | null}. 없는 단계 ID 는 422. 보낸 행만 바꾸지 않고 통째로 바꾼다."""
+    if not isinstance(mapping, dict) or len(mapping) > 500:
+        raise ApiError(422, "VALIDATION_ERROR", "mapping 은 {단계 ID: 퍼널 단계 ID} 객체여야 합니다.",
+                       {"mapping": ["객체여야 합니다."]})
+    stage_ids = {s["id"] for s in prediction_stages(latest_report(project))}
+    bad = sorted(k for k, v in mapping.items()
+                 if not isinstance(k, str) or not k or len(k) > MAX_PATH or (v is not None and v not in stage_ids))
+    if bad:
+        raise ApiError(422, "VALIDATION_ERROR", "알 수 없는 퍼널 단계가 있습니다.",
+                       {f"mapping.{k}": ["알 수 없는 퍼널 단계입니다."] for k in bad[:20]})
+    site.mapping = dict(mapping)
+    site.mapping_saved_at = timezone.now()
+    site.save(update_fields=["mapping", "mapping_saved_at"])
+    return mapping_dict(project, site)
