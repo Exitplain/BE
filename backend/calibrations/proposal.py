@@ -51,6 +51,19 @@ def _top_cause(report, screens, task_id, stage_id):
     return key if key in CAUSES else None
 
 
+def _normalized(params):
+    return {sid: v for sid, v in ((params or {}).get("segments") or {}).items() if v}
+
+
+def _params_of(project, revision):
+    """그 리비전의 보정 값 (0 = 기본 모형)."""
+    from .models import CalibrationRevision
+    if not revision:
+        return {}
+    rev = CalibrationRevision.objects.filter(project=project, revision=revision).first()
+    return _normalized(rev.params if rev else {})
+
+
 def _raw(params, segment_id, kind, cause=None):
     values = (params.get("segments") or {}).get(segment_id) or {}
     if kind == "threshold":
@@ -76,6 +89,10 @@ def build(project, days=7):
     if report is None:
         return {**out, "available": False, "reason": "NO_PREDICTION",
                 "message": "먼저 사전 테스트를 한 번 실행해야 비교할 수 있어요."}
+    used = report.run.config.get("calibration_revision", 0) if report.run_id else 0
+    if _params_of(project, used) != _normalized(params):
+        return {**out, "available": False, "reason": "WAITING_NEXT_RUN", "base_revision": revision,
+                "message": "보정을 적용한 뒤 아직 새 사전 테스트가 없어요. 다음 사전 테스트가 끝나면 다시 비교해요."}
     funnel = measure.funnel_dict(project, site, days, "all")
     comparable = [t for t in funnel["tasks"] if not t["collecting"] and t["compared_stages"]]
     errors = [t["mean_error"] for t in comparable if t["mean_error"] is not None]
