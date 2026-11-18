@@ -18,6 +18,19 @@ class Persona(StrictModel):
     digital_literacy: int = Field(default=50, ge=0, le=100)    # 디지털 숙련도: 낮을수록 헤맬 때 더 답답해함
     price_sensitivity: int = Field(default=50, ge=0, le=100)   # 가격 민감도: 높을수록 뒤늦은 추가 비용에 민감
     trust_need: int = Field(default=50, ge=0, le=100)          # 신뢰 요구: 높을수록 개인정보 입력을 부담스러워함
+    # 보정(CAL-01): 원인별 가중치 배율 {원인: 0.25~3.0}. 원인 키는 behavior.CAUSES. 없으면 1.0 (기본 모형)
+    weight_scale: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_weight_scale(self):
+        from .behavior import CAUSES
+        unknown = sorted(set(self.weight_scale) - set(CAUSES))
+        if unknown:
+            raise ValueError(f"weight_scale 에 모르는 원인이 있습니다: {', '.join(unknown)}")
+        bad = sorted(k for k, v in self.weight_scale.items() if not 0.25 <= v <= 3.0)
+        if bad:
+            raise ValueError(f"weight_scale 은 0.25~3.0 이어야 합니다: {', '.join(bad)}")
+        return self
 
 
 class RunInput(StrictModel):
