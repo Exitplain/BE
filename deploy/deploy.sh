@@ -33,6 +33,10 @@ sudo systemctl restart exitplain-web
 if systemctl is-enabled --quiet exitplain-worker 2>/dev/null; then
   sudo systemctl restart exitplain-worker
 fi
+# 받은 코드 미리보기 서버 (deploy/README.md 3절 "코드 미리보기 서버"에서 한 번 enable 한 뒤부터)
+if systemctl is-enabled --quiet exitplain-preview 2>/dev/null; then
+  sudo systemctl restart exitplain-preview
+fi
 
 sleep 2
 systemctl is-active exitplain-web

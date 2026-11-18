@@ -12,7 +12,7 @@ from django.utils import timezone
 from common.exceptions import ApiError
 from common.progress import STALE_SECONDS, next_seq, run_tracked, start_background
 
-from . import analysis, intake
+from . import analysis, intake, preview
 from .models import SourceConnection, SourceSnapshot
 
 logger = logging.getLogger(__name__)
@@ -168,8 +168,17 @@ def _execute(snapshot, job):
     log.take()
     for key in ("commit_sha", "tree_digest", "file_count", "total_bytes", "skipped", "runnable", "static_root", "framework", "analysis"):
         setattr(snapshot, key, result[key])
+    if snapshot.runnable == SourceSnapshot.Runnable.STATIC:
+        # 미리보기 서버가 내보낼 폴더 (tree_digest 를 낸 뒤에 써서 내용 해시에 섞이지 않는다)
+        preview.write_manifest(tree_dir(snapshot.pk), "/".join(p for p in (snapshot.subdirectory, snapshot.static_root) if p))
     snapshot.state = SourceSnapshot.State.READY
     snapshot.save()
+
+
+def previewable(snapshot):
+    """URL 없이 미리보기로 사이트 확인·실행할 수 있는 스냅샷인지."""
+    return (snapshot.state == SourceSnapshot.State.READY and snapshot.runnable == SourceSnapshot.Runnable.STATIC
+            and snapshot.files_deleted_at is None and snapshot.connection.status == SourceConnection.Status.ACTIVE)
 
 
 def _run_in_background(snapshot_id, job):

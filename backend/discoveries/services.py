@@ -61,8 +61,34 @@ def _origin(url):
     return f"{p.scheme}://{p.netloc}"
 
 
+class PreviewUnavailable(Exception):
+    pass
+
+
+def _prepare_source(project, data):
+    """코드(정적 사이트)로 확인: 받은 스냅샷을 미리보기 주소로 둘러본다. 데모·URL 설정과 관계없이 explore 로 돈다."""
+    from sources.models import SourceSnapshot
+    from sources.preview import origin_for
+    from sources.services import previewable
+    snapshot = SourceSnapshot.objects.select_related("connection").filter(
+        pk=data["source_snapshot_id"], connection__project=project).first()
+    if snapshot is None:
+        raise ApiError(422, "VALIDATION_ERROR", "이 프로젝트에서 받은 코드가 아닙니다.",
+                       {"source_snapshot_id": ["이 프로젝트의 코드 스냅샷이 아닙니다."]})
+    if not previewable(snapshot):
+        raise ApiError(409, "SOURCE_NOT_RUNNABLE", "URL 없이 열 수 있는 정적 사이트 코드가 아니에요. 빌드 결과물 zip 이나 배포 URL 을 써 주세요.")
+    if data["login_mode"] != Discovery.LoginMode.NONE:
+        raise ApiError(422, "VALIDATION_ERROR", "코드로 테스트할 때는 로그인 연결을 쓸 수 없어요.",
+                       {"login_mode": ["none 만 쓸 수 있습니다."]})
+    origin = origin_for(snapshot.pk)
+    return {"entry_url": origin + "/", "allowed_origins": [origin], "explore": True, "account": None,
+            "variant": data["variant"], "login_mode": data["login_mode"], "source": snapshot}
+
+
 def _prepare(project, data):
     """요청 검사. 둘러보기에 필요한 값을 돌려준다 (테스트 계정 값은 메모리에만 둔다)."""
+    if data.get("source_snapshot_id"):
+        return _prepare_source(project, data)
     target = project_target(project)
     entry_url = data.get("entry_url") or target["entry_url"]
     p = urlsplit(entry_url)
@@ -87,11 +113,16 @@ def _prepare(project, data):
             raise ApiError(422, "LOGIN_URL_REQUIRED", "테스트 계정의 로그인 화면 주소를 먼저 등록해주세요.",
                            {"login_url": ["로그인 화면 주소가 없습니다."]})
     return {"entry_url": entry_url, "allowed_origins": target["allowed_origins"], "explore": explore,
-            "account": account, "variant": data["variant"], "login_mode": data["login_mode"]}
+            "account": account, "variant": data["variant"], "login_mode": data["login_mode"], "source": None}
 
 
 def _work(ctx, progress):
     """실제 둘러보기. 별도 스레드에서 돈다."""
+    if ctx["source"] is not None:
+        from sources.preview import reachable
+        progress({"kind": "preview", "message": "받은 코드를 미리보기로 여는 중이에요"})
+        if not reachable(ctx["allowed_origins"][0]):
+            raise PreviewUnavailable()
     if ctx["explore"]:
         account = ctx["account"]
         login = {k: account[k] for k in ("url", "username", "password")} if account else None
@@ -104,6 +135,8 @@ def _work(ctx, progress):
 
 def _failure(exc, account):
     """둘러보기 예외 → (HTTP 상태, 오류 코드, 사용자 문구). 내부 예외 문구는 내보내지 않는다."""
+    if isinstance(exc, PreviewUnavailable):
+        return 503, "PREVIEW_UNAVAILABLE", "받은 코드를 여는 미리보기 서버가 꺼져 있어요. 관리자에게 알려주세요."
     if account and isinstance(exc, ValueError) and "로그인" in str(exc):
         from testaccounts.services import record_check
         record_check(account["account_id"], False, "사이트 확인 중 로그인 실패")
@@ -114,6 +147,7 @@ def _failure(exc, account):
 def _new(user, project, ctx):
     return Discovery.objects.create(
         project=project, created_by=user, entry_url=ctx["entry_url"], login_mode=ctx["login_mode"],
+        source_snapshot=ctx["source"],
         variant="explore" if ctx["explore"] else ctx["variant"], status=Discovery.Status.RUNNING,
         progress=[{"seq": 1, "t": 0.0, "kind": "queued", "message": "사이트 확인을 시작했어요"}],
         expires_at=timezone.now() + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS))

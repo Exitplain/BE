@@ -242,6 +242,9 @@ EXITPLAIN_SOURCE_MAX_FILE_BYTES = int(os.environ.get('EXITPLAIN_SOURCE_MAX_FILE_
 EXITPLAIN_SOURCE_MAX_RATIO = int(os.environ.get('EXITPLAIN_SOURCE_MAX_RATIO', 100))
 EXITPLAIN_SOURCE_MAX_ACTIVE = int(os.environ.get('EXITPLAIN_SOURCE_MAX_ACTIVE', 2))
 EXITPLAIN_SOURCE_BACKGROUND = os.environ.get('EXITPLAIN_SOURCE_BACKGROUND', 'true').lower() != 'false'
+# 받은 정적 사이트 미리보기 (manage.py serve_previews). 127.0.0.1 에만 열고 에이전트만 http://s-<id>.localhost:<port>/ 로 연다
+EXITPLAIN_PREVIEW_BIND = os.environ.get('EXITPLAIN_PREVIEW_BIND', '127.0.0.1')
+EXITPLAIN_PREVIEW_PORT = int(os.environ.get('EXITPLAIN_PREVIEW_PORT', 8090))
 # 업로드 zip 은 메모리 대신 임시 파일로 받는다 (2.5MB 넘으면)
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2_621_440
 # 리포트 실행 퍼널 단계의 화면 역할 이름 ('/product' → '상품 상세'). auto: ANTHROPIC_API_KEY 가 있으면 Claude, off: 끔

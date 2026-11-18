@@ -179,6 +179,22 @@ def update_plan(plan_id, revision, data):
 
 # ---------- 시작 전 확인 (P05c) ----------
 
+def _site_origins(plan):
+    """에이전트가 다닐 수 있는 출처. 코드로 확인했으면 그 미리보기 출처 하나뿐이다."""
+    if plan.discovery.source_snapshot_id:
+        from sources.preview import origin_for
+        return [origin_for(plan.discovery.source_snapshot_id)]
+    return project_target(plan.project)["allowed_origins"]
+
+
+def _site_source(plan):
+    snapshot = plan.discovery.source_snapshot
+    if snapshot is None:
+        return None
+    return {"snapshot_id": str(snapshot.pk), "commit_sha": snapshot.commit_sha, "tree_digest": snapshot.tree_digest,
+            "provider": snapshot.connection.provider}
+
+
 def _age_labels(ages):
     return [catalog.AGE_OPTIONS[a] for a in ages]
 
@@ -246,8 +262,10 @@ def confirm_plan(plan_id, revision, user):
         "project_id": plan.project_id,
         "site": {"entry_url": plan.discovery.entry_url, "login_mode": plan.discovery.login_mode,
                  "variant": plan.discovery.variant,
-                 "allowed_origins": project_target(plan.project)["allowed_origins"],
-                 "discovery_id": str(plan.discovery_id)},
+                 "allowed_origins": _site_origins(plan),
+                 "discovery_id": str(plan.discovery_id),
+                 # 코드로 확인했으면 어떤 코드로 실행하는지 고정해 남긴다 (SRC-02)
+                 "source": _site_source(plan)},
         "features": plan.discovery.features,
         "screen_names": dict(plan.discovery.screen_names or {}),   # 화면 역할 이름 (리포트·세션 표시용, 에이전트에는 안 넘김)
         "tasks": [{**tasks[t], "funnel": funnels[t]} for t in plan.task_ids],

@@ -80,6 +80,17 @@ chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
 
 코드 연결 nginx 설정(`source-snapshots` 의 30MB 업로드)은 `deploy.sh` 가 복사하지 않는다. 바꾼 뒤 한 번 `sudo cp deploy/nginx-exitplain.conf /etc/nginx/sites-available/exitplain && sudo nginx -t && sudo systemctl reload nginx`.
 
+### 코드 미리보기 서버 (URL 없는 프로젝트, 한 번만)
+"코드만 있어요"로 받은 정적 사이트를 에이전트가 열 수 있게 127.0.0.1:8090 에서만 내보낸다 (`backend/sources/preview.py`).
+주소는 `http://s-<스냅샷 id>.localhost:8090/` 이고 Chromium 이 루프백으로 푼다. nginx·보안 그룹으로 외부에 열지 않는다.
+```bash
+sudo cp /srv/exitplain/BE/deploy/exitplain-preview.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now exitplain-preview
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8090/    # 404 면 켜진 것 (주소에 스냅샷이 없어서)
+```
+이후 `deploy.sh` 가 함께 재시작한다. 포트를 바꾸려면 `.env` 에 `EXITPLAIN_PREVIEW_PORT` 를 넣고 웹·워커·미리보기를 모두 재시작한다
+(세 곳이 같은 값을 써야 실행 입력의 주소와 서버가 맞는다).
+
 ## 4. `settings.py` 반영 내용 (`a/deploy-settings` 브랜치, 문서 규칙상 PR로 머지)
 위 3절의 환경변수를 `settings.py`가 읽도록 이미 반영했다. 환경변수가 없으면 로컬 개발 기본값으로 동작한다.
 - SQLite는 WAL 모드 + `transaction_mode=IMMEDIATE` + 타임아웃 20초로 웹·워커 동시 쓰기 시 `database is locked`를 줄인다.

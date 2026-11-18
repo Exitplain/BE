@@ -6,6 +6,7 @@
 규칙
 - 클라우드 메타데이터 주소(169.254.0.0/16, fd00:ec2::/32)는 어떤 설정으로도 허용하지 않는다.
 - 공인 주소가 아닌 것(사설·루프백·링크 로컬·CGNAT·예약 대역)은 settings.ALLOWED_TARGET_ORIGINS 에 적힌 origin 만 허용한다.
+- 받은 정적 사이트 미리보기(http://s-<id>.localhost:<EXITPLAIN_PREVIEW_PORT>)는 예외다. 정적 파일만 내보내는 우리 서버라 내부 자원이 없다.
 - 호스트 이름은 DNS 로 풀어서 나온 모든 IP 를 검사한다. 풀리지 않는 이름은 접속할 수 없으므로 통과시킨다.
 알려진 한계: DNS 를 검사한 뒤 접속하기 전에 답이 바뀌는 공격(DNS rebinding)은 막지 못한다. 에이전트가 허용 origin 밖 이동을 막는다.
 """
@@ -46,6 +47,9 @@ def check_origin(origin):
     host = parts.hostname
     if parts.scheme not in {"http", "https"} or not host:
         raise TargetNotAllowed("HTTP 또는 HTTPS로 시작하는 주소를 입력해주세요")
+    from sources.preview import is_preview_origin   # runs 보다 아래 계층이 아니라 호출 시점에만 가져온다
+    if is_preview_origin(origin):
+        return None   # 받은 정적 사이트 미리보기: 우리 서버가 정적 파일만 내보내는 고정 포트 (sources/preview.py)
     port = parts.port or (443 if parts.scheme == "https" else 80)
     try:
         addresses = [_ip(host)]
