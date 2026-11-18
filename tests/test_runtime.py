@@ -120,3 +120,17 @@ def test_rejects_path_traversal_and_duplicate_ids():
     raw["personas"][1]["id"] = "A"
     with pytest.raises(ValidationError):
         RunInput.model_validate(raw)
+
+
+async def test_third_party_subresources_are_blocked_without_ending_the_session(tmp_path):
+    with demo_server() as base:
+        report = await execute_run(config(base, "thirdparty"), ScriptedPolicy, tmp_path, lambda e: None)
+    assert [s["status"] for s in report["sessions"]] == ["success", "success"]
+    assert all(s["blocked_resources"] >= 1 for s in report["sessions"])
+
+
+async def test_navigating_the_page_off_site_is_still_blocked(tmp_path):
+    with demo_server() as base:
+        report = await execute_run(config(base, "offsite"), ScriptedPolicy, tmp_path, lambda e: None)
+    assert {(s["status"], s["reason"]) for s in report["sessions"]} == {
+        ("blocked_auth", "An out-of-scope network request was blocked")}

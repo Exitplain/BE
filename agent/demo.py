@@ -20,7 +20,10 @@ def demo_server():
                 count = 8 if p.path == "/problem" else 1
                 fields = '<label>식별자<input name="token" required></label>'
                 fields += ''.join(f'<input required name="field{i}" aria-label="추가 필드 {i}">' for i in range(count-1))
-                body = f'<h1>테스트 주문</h1><form action="/success">{fields}<button>모의 주문</button></form>' + '''<div id="initial"></div><script>document.querySelector('#initial').textContent='initial:'+localStorage.getItem('participant');document.querySelector('form').addEventListener('submit',()=>{let v=document.querySelector('[name=token]').value;localStorage.setItem('participant',v);document.cookie='participant='+v+';path=/';});</script>'''
+                action = "http://offsite.invalid/success" if p.path == "/offsite" else "/success"
+                body = f'<h1>테스트 주문</h1><form action="{action}">{fields}<button>모의 주문</button></form>' + '''<div id="initial"></div><script>document.querySelector('#initial').textContent='initial:'+localStorage.getItem('participant');document.querySelector('form').addEventListener('submit',()=>{let v=document.querySelector('[name=token]').value;localStorage.setItem('participant',v);document.cookie='participant='+v+';path=/';});</script>'''
+            if p.path == "/thirdparty":   # 다른 출처의 분석 스크립트·이미지 (막혀도 세션은 이어져야 함)
+                body += '<script src="http://analytics.invalid/e.js" async></script><img src="http://cdn.invalid/x.png" alt="">'
             data = ('<!doctype html><meta charset="utf-8">' + body).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

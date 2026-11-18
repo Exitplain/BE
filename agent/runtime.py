@@ -76,15 +76,21 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     started = time.monotonic()
                     state = {"status": "budget_exceeded", "reason": "Step limit reached", "steps": 0,
                              "calls": 0, "input": 0, "output": 0, "by_model": {}, "issues": [], "artifact": None,
-                             "judgments": 0, "blocked_writes": 0}
+                             "judgments": 0, "blocked_writes": 0, "blocked_resources": 0}
                     context = await browser.new_context(viewport={"width": config.viewport_width, "height": config.viewport_height},
                                                         service_workers="block")
                     policy = None
                     blocked = []
                     logging_in = [config.login_url is not None]   # 로그인 요청(POST)은 read_only 여도 보낸다
                     async def guard(route):
-                        if origin(route.request.url) not in config.allowed_origins:
-                            blocked.append(route.request.url)
+                        request = route.request
+                        if origin(request.url) not in config.allowed_origins:
+                            # 허용 출처 밖 요청은 모두 막는다. 세션을 끝내는 건 화면 자체가 밖으로 나가려 할 때(최상위 이동)뿐이다.
+                            # 분석 스크립트·폰트·이미지 같은 외부 부속 요청은 막고 기록만 한다 (사이트가 흔히 쓰므로)
+                            if request.is_navigation_request() and request.frame.parent_frame is None:
+                                blocked.append(request.url)
+                            else:
+                                state["blocked_resources"] += 1
                             await route.abort()
                         elif config.read_only and not logging_in[0] and route.request.method not in SAFE_METHODS:
                             state["blocked_writes"] += 1      # 운영 자료가 바뀌지 않게 쓰기 요청만 막는다
@@ -298,7 +304,8 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                         input_tokens=state["input"], output_tokens=state["output"], usage_by_model=state["by_model"],
                         judgments=state["judgments"],
                         issues=state["issues"], final_artifact=state["artifact"],
-                        terminal_stage=stage, stages_reached=list(meter.stages), blocked_writes=state["blocked_writes"])
+                        terminal_stage=stage, stages_reached=list(meter.stages), blocked_writes=state["blocked_writes"],
+                        blocked_resources=state["blocked_resources"])
                     (folder / "result.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
                     await emit("session.finished", sid, result.model_dump())
                     return result

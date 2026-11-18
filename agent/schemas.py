@@ -126,3 +126,4 @@ class SessionResult(StrictModel):
     terminal_stage: str | None = None                          # 마지막으로 본 화면의 퍼널 단계
     stages_reached: list[str] = Field(default_factory=list)    # 처음 도달한 순서대로
     blocked_writes: int = 0                                    # read_only 로 막은 쓰기 요청 수
+    blocked_resources: int = 0                                 # 허용 출처 밖이라 막은 부속 요청 수 (스크립트·이미지 등)
