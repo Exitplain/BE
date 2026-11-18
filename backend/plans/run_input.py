@@ -38,10 +38,15 @@ def _entry_url(entry_url, variant, case):
 
 
 def _target_url(site, task):
-    """데모 과업은 ?variant=&case=, 사이트 확인(explore)으로 만든 과업은 사이트 출처 + 과업의 시작 화면."""
+    """데모 과업은 ?variant=&case=, 사이트 확인(explore)으로 만든 과업은 사이트 출처 + 과업의 시작 화면.
+
+    시작 화면에도 입력한 주소의 쿼리를 그대로 붙인다. ?variant=problem 처럼 쿼리로 버전을 고르는 사이트는
+    쿼리를 버리면 다른 버전(기본값)을 테스트하게 된다.
+    """
     if task.get("start_path"):
         parts = urlsplit(site["entry_url"])
-        return urlunsplit((parts.scheme, parts.netloc, task["start_path"], "", ""))
+        path, _, own_query = task["start_path"].partition("?")
+        return urlunsplit((parts.scheme, parts.netloc, path, own_query or parts.query, ""))
     return _entry_url(site["entry_url"], site["variant"], task["case"])
 
 
