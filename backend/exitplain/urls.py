@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/v1/', include('accounts.urls')),
     path('api/v1/', include('testaccounts.urls')),
     path('api/v1/', include('sources.urls')),
+    path('api/v1/', include('measurements.urls')),
     # --- 백엔드 A: 프로젝트·실행 ---
     path('api/v1/', include('projects.urls')),
     path('api/v1/', include('runs.urls')),

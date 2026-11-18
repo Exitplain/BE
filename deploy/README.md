@@ -77,6 +77,8 @@ sudo systemctl enable --now exitplain-worker   # run_worker 구현됨 (대기 �
 | `EXITPLAIN_SOURCE_ROOT` | 코드 연결(zip·git)로 받은 코드를 두는 폴더 | 예: `/srv/exitplain/data/source_snapshots`. 레포 밖에 둔다. nginx 로 직접 서빙하지 않는다 |
 | `EXITPLAIN_SOURCE_GIT_HOSTS` | 받을 수 있는 공개 git 호스트 | 기본 `github.com,gitlab.com`. 서버에 `git` 이 설치돼 있어야 한다 |
 | `EXITPLAIN_SOURCE_MAX_UPLOAD_BYTES` 등 | zip 크기·파일 수·압축률 한도 | 기본 30MB 업로드 / 200MB·1만 개 해제. nginx `source-snapshots` 위치의 `client_max_body_size` 와 맞춘다 |
+| `EXITPLAIN_PUBLIC_URL` | 실측 수집 스크립트(`/api/v1/e.js`) 주소의 앞부분 | **https 프런트 주소** (예: Vercel 도메인). 고객 사이트가 https 라서 http IP 를 쓰면 mixed content 로 막힌다. 비우면 요청 주소를 쓴다 |
+| `EXITPLAIN_MEASURE_PER_MINUTE` | 사이트 하나가 1분에 보낼 수 있는 수집 건수 | 기본 600. 넘는 건 조용히 버린다 |
 
 코드 연결 nginx 설정(`source-snapshots` 의 30MB 업로드)은 `deploy.sh` 가 복사하지 않는다. 바꾼 뒤 한 번 `sudo cp deploy/nginx-exitplain.conf /etc/nginx/sites-available/exitplain && sudo nginx -t && sudo systemctl reload nginx`.
 
