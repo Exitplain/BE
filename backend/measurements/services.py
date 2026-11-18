@@ -64,7 +64,17 @@ def parse(body):
         return None
     if step and not (isinstance(step, str) and STEP_RE.match(step)):
         return None
-    return {"key": key, "sid": sid, "path": path, "step": step}
+    return {"key": key, "sid": sid, "path": path, "step": step, "device": device_of(data.get("w"))}
+
+
+MOBILE_MAX_WIDTH = 767
+
+
+def device_of(width):
+    """화면 너비만 받아 모바일·데스크톱으로 나눈다 (기기 이름·user agent 는 받지 않는다)."""
+    if isinstance(width, bool) or not isinstance(width, int) or not 0 < width <= 10000:
+        return ""
+    return "mobile" if width <= MOBILE_MAX_WIDTH else "desktop"
 
 
 def _over_limit(site):
@@ -87,7 +97,7 @@ def collect(body, origin):
     origin = (origin or "").rstrip("/").lower()
     if origin not in origins_of(site.project) or _over_limit(site):
         return False
-    MeasureHit.objects.create(site=site, sid=hit["sid"], path=hit["path"], step=hit["step"])
+    MeasureHit.objects.create(site=site, sid=hit["sid"], path=hit["path"], step=hit["step"], device=hit["device"])
     MeasureSite.objects.filter(pk=site.pk).update(last_received_at=timezone.now(), last_origin=origin)
     return True
 
@@ -122,6 +132,7 @@ def status_dict(request, project, site):
         "key": None, "snippet": None,
         "installed": False, "last_received_at": None, "last_origin": None,
         "sessions_24h": 0, "events_24h": 0,
+        "mapping_saved_at": None,          # R05 매핑을 한 번이라도 저장했으면 실측 퍼널·비교 화면으로 간다
     }
     if not out["available"]:
         out["reason"] = "NOT_DEPLOYED"
@@ -137,6 +148,7 @@ def status_dict(request, project, site):
         "last_origin": site.last_origin or None,
         "sessions_24h": recent.values("sid").distinct().count(),
         "events_24h": recent.count(),
+        "mapping_saved_at": site.mapping_saved_at.isoformat() if site.mapping_saved_at else None,
     })
     return out
 
@@ -235,3 +247,121 @@ def save_mapping(project, site, mapping):
     site.mapping_saved_at = timezone.now()
     site.save(update_fields=["mapping", "mapping_saved_at"])
     return mapping_dict(project, site)
+
+
+# ---------- R06 실측 퍼널 · R08 예측 vs 실측 ----------
+#
+# 과업마다 예측 리포트의 실행 퍼널 단계를 그대로 쓰고, 매핑으로 그 단계에 연결된 실측 단계(경로)에 온 고유 세션을 센다.
+# - 실측 도달률 = 그 단계에 온 세션 ÷ 첫 단계에 온 세션 (순서를 엄격히 따지지 않는다: 예측 rate_of_valid 와 같은 방식)
+# - 예측 범위 = 예측 도달 세션/유효 세션 비율의 Wilson 95% 구간 (페르소나 수가 적을수록 넓어진다)
+# - 오차 = 실측 − 범위 중앙값, 실측이 범위 밖이면 차이 구간
+# - 매핑이 없는 단계는 실측 null, 첫 단계는 기준(100%)이라 평균 오차·차이 구간에서 뺀다
+
+MIN_SAMPLE = 100          # 첫 단계 세션이 이보다 적으면 "수집 중" (비교는 보여주되 표본 부족으로 표시)
+DEVICES = ("all", "mobile", "desktop")
+Z95 = 1.96
+
+
+def wilson(successes, total):
+    if not total:
+        return None
+    p = successes / total
+    denom = 1 + Z95 ** 2 / total
+    centre = (p + Z95 ** 2 / (2 * total)) / denom
+    half = Z95 * ((p * (1 - p) / total + Z95 ** 2 / (4 * total ** 2)) ** 0.5) / denom
+    return max(0.0, centre - half) * 100, min(1.0, centre + half) * 100
+
+
+def _pct(value):
+    return None if value is None else round(value, 1)
+
+
+def _stage_sessions(site, days, device, mapping):
+    """{예측 단계 ID: 그 단계로 매핑된 실측 단계에 온 고유 sid 집합}"""
+    since = timezone.now() - timedelta(days=days)
+    hits = MeasureHit.objects.filter(site=site, created_at__gte=since)
+    if device != "all":
+        hits = hits.filter(device=device)
+    by_stage = {}
+    for path, step, sid in hits.values_list("path", "step", "sid").distinct():
+        stage = mapping.get(step or path)
+        if stage:
+            by_stage.setdefault(stage, set()).add(sid)
+    return by_stage
+
+
+def _max_drop(stages, key):
+    """도달률이 가장 크게 떨어지는 이웃 단계 쌍 (from, to). 값이 없는 단계는 건너뛴다."""
+    points = [(s["id"], s["name"], key(s)) for s in stages if key(s) is not None]
+    best = None
+    for (a_id, a_name, a), (b_id, b_name, b) in zip(points, points[1:]):
+        if best is None or a - b > best[0]:
+            best = (a - b, {"from": a_id, "to": b_id, "label": f"{a_name}→{b_name}"})
+    return best[1] if best else None
+
+
+def _task_compare(task, by_stage):
+    funnel = task.get("journey_funnel") or {}
+    valid = funnel.get("valid_sessions") or 0
+    stages = funnel.get("stages") or []
+    base = len(by_stage.get(stages[0]["path"], ())) if stages else 0
+    rows = []
+    for index, stage in enumerate(stages):
+        band = wilson(stage.get("reached") or 0, valid)
+        sessions = len(by_stage[stage["path"]]) if stage["path"] in by_stage else None
+        actual = sessions / base * 100 if sessions is not None and base else None
+        low, high = (band if band else (None, None))
+        mid = (low + high) / 2 if band else None
+        # 첫 단계는 실측 도달률의 기준(항상 100%)이라 비교하지 않는다 (Figma R08 도 둘째 단계부터)
+        compared = index > 0 and actual is not None and band is not None
+        error = actual - mid if compared else None
+        rows.append({
+            "id": stage["path"], "name": stage.get("name") or stage["path"], "is_goal": bool(stage.get("is_goal")),
+            "predicted": {"low": _pct(low), "high": _pct(high), "mid": _pct(mid),
+                          "reached": stage.get("reached") or 0, "valid": valid},
+            "actual": None if sessions is None else {"sessions": sessions, "rate": _pct(actual)},
+            "error": _pct(error),
+            "gap": compared and not (low <= actual <= high),
+            "compared": compared,
+            "short_sample": sessions is not None and sessions < MIN_SAMPLE,
+        })
+    errors = [abs(r["error"]) for r in rows if r["error"] is not None]
+    predicted_drop = _max_drop(rows, lambda r: r["predicted"]["mid"])
+    actual_drop = _max_drop(rows, lambda r: r["actual"]["rate"] if r["actual"] else None)
+    return {
+        "task_id": task.get("task_id"), "name": task.get("name") or task.get("task_id"),
+        "base_sessions": base, "collecting": base < MIN_SAMPLE,
+        "stages": rows,
+        "mapped_stages": sum(1 for r in rows if r["actual"] is not None),
+        "compared_stages": sum(1 for r in rows if r["compared"]),
+        "mean_error": _pct(sum(errors) / len(errors)) if errors else None,
+        "gaps": [r["id"] for r in rows if r["gap"]],
+        "max_drop": {"predicted": predicted_drop, "actual": actual_drop,
+                     "matched": bool(predicted_drop and actual_drop
+                                     and (predicted_drop["from"], predicted_drop["to"])
+                                     == (actual_drop["from"], actual_drop["to"]))},
+    }
+
+
+def funnel_dict(project, site, days, device):
+    report = latest_report(project)
+    stage_ids = {s["id"] for s in prediction_stages(report)}
+    mapping = {}
+    for row in mapping_dict(project, site)["rows"] if report else []:
+        if row["stage_id"] in stage_ids:
+            mapping[row["step_id"]] = row["stage_id"]
+    by_stage = _stage_sessions(site, days, device, mapping) if mapping else {}
+    until = timezone.now()
+    out = {
+        "project_id": project.pk, "days": days, "device": device,
+        "since": (until - timedelta(days=days)).isoformat(), "until": until.isoformat(),
+        "min_sample": MIN_SAMPLE,
+        "report": None if report is None else {
+            "report_id": str(report.id), "created_at": report.created_at.isoformat(),
+            "run_sequence": report.run.sequence_no if report.run_id else None},
+        "mapping_saved": bool(site.mapping_saved_at),
+        "tasks": [_task_compare(t, by_stage) for t in (report.data.get("tasks") or [])] if report else [],
+    }
+    if report is None:
+        out.update({"reason": "NO_PREDICTION", "message": "먼저 사전 테스트를 한 번 실행해야 비교할 단계가 생겨요."})
+    return out

@@ -8,5 +8,7 @@ urlpatterns = [
     path("projects/<int:project_id>/measurement", views.MeasurementView.as_view(), name="measurement"),
     path("projects/<int:project_id>/measurement/mapping", views.MeasurementMappingView.as_view(),
          name="measurement-mapping"),
+    path("projects/<int:project_id>/measurement/funnel", views.MeasurementFunnelView.as_view(),
+         name="measurement-funnel"),
     path("projects/<int:project_id>/measurement/steps", views.MeasurementStepsView.as_view(), name="measurement-steps"),
 ]

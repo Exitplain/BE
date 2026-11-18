@@ -134,8 +134,7 @@ REPORT_DATA = {"tasks": [
 ]}
 
 
-@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
-class MappingTests(WizardMixin, TestCase):
+class MeasureHelpers(WizardMixin):
     def setUp(self):
         super().setUp()
         cache.clear()
@@ -151,10 +150,16 @@ class MappingTests(WizardMixin, TestCase):
         body = json.dumps({"key": key, "sid": sid, "path": path, **extra})
         self.beacon.post("/api/v1/collect", body, content_type="text/plain", HTTP_ORIGIN=ORIGIN)
 
+    REPORT = REPORT_DATA
+
     def report(self):
         snapshot = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
         ReportSnapshot.objects.create(plan_snapshot=snapshot, run_ref="r1", revision=1, status="final",
-                                      source="database", data=REPORT_DATA)
+                                      source="database", data=self.REPORT)
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class MappingTests(MeasureHelpers, TestCase):
 
     def test_collected_paths_use_the_same_stage_ids_as_the_agent_funnel(self, _):
         key = self.issue()
@@ -191,6 +196,7 @@ class MappingTests(WizardMixin, TestCase):
         self.assertEqual(rows["/faq"], (None, True))
         self.assertEqual(rows["/cart"], ("/cart", False))      # 저장 안 한 행은 계속 추천값
         self.assertIsNotNone(res.json()["saved_at"])
+        self.assertIsNotNone(self.client.get(self.url).json()["mapping_saved_at"])
 
     def test_rejects_unknown_stage_and_extra_fields(self, _):
         self.report()
@@ -206,3 +212,71 @@ class MappingTests(WizardMixin, TestCase):
         self.issue()
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(self.url + "/mapping").status_code, 403)
+
+
+def _reached(path, name, reached, goal=False):
+    return {**_stage(path, name, goal), "reached": reached}
+
+
+FUNNEL_DATA = {"tasks": [
+    {"task_id": "order", "name": "첫 주문", "journey_funnel": {"valid_sessions": 20, "stages": [
+        _reached("/", "첫 화면", 20), _reached("/products/:id", "상품 상세", 16), _reached("/cart", "장바구니", 12),
+        _reached("/order/success", "주문 완료", 5, goal=True)]}},
+]}
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class FunnelTests(MeasureHelpers, TestCase):
+    REPORT = FUNNEL_DATA
+
+    def visit(self, key, path, n, start=0, width=390):
+        for i in range(start, start + n):
+            self.send(key, path, sid=f"visitor{i:04d}", w=width)
+
+    def test_actual_funnel_and_prediction_band(self, _):
+        self.report()
+        key = self.issue()
+        self.visit(key, "/", 10)
+        self.visit(key, "/product/7", 8)
+        self.visit(key, "/cart", 3, width=1280)
+        self.visit(key, "/order/success", 2)
+        res = self.client.get(self.url + "/funnel?days=7")
+        self.assertEqual(res.status_code, 200, res.content)
+        task = res.json()["tasks"][0]
+        self.assertEqual((task["base_sessions"], task["collecting"], task["mapped_stages"]), (10, True, 4))
+        rows = {r["id"]: r for r in task["stages"]}
+        self.assertEqual([rows[k]["actual"]["rate"] for k in ("/", "/products/:id", "/cart", "/order/success")],
+                         [100.0, 80.0, 30.0, 20.0])
+        low, high = services.wilson(12, 20)
+        self.assertEqual((rows["/cart"]["predicted"]["low"], rows["/cart"]["predicted"]["high"]),
+                         (round(low, 1), round(high, 1)))
+        self.assertEqual(task["gaps"], ["/cart"])                       # 30% 는 예측 범위(약 39~78%) 밖
+        self.assertAlmostEqual(rows["/cart"]["error"], round(30 - (low + high) / 2, 1), places=1)
+        self.assertEqual(task["max_drop"]["actual"]["label"], "상품 상세→장바구니")
+        self.assertIsNotNone(task["mean_error"])
+        self.assertEqual((rows["/"]["error"], rows["/"]["compared"], task["compared_stages"]), (None, False, 3))
+
+        mobile = self.client.get(self.url + "/funnel?days=7&device=mobile").json()["tasks"][0]
+        self.assertIsNone({r["id"]: r for r in mobile["stages"]}["/cart"]["actual"])   # 장바구니는 데스크톱만 왔다
+
+    def test_unmapped_stage_has_no_actual_and_is_left_out(self, _):
+        self.report()
+        key = self.issue()
+        self.visit(key, "/", 5)
+        self.visit(key, "/cart", 2)
+        self.client.put(self.url + "/mapping", {"mapping": {"/": "/", "/cart": None}}, format="json")
+        rows = {r["id"]: r for r in self.client.get(self.url + "/funnel").json()["tasks"][0]["stages"]}
+        self.assertEqual(rows["/"]["actual"]["sessions"], 5)
+        self.assertIsNone(rows["/cart"]["actual"])
+        self.assertFalse(rows["/cart"]["gap"])
+
+    def test_no_report_and_bad_params(self, _):
+        self.issue()
+        body = self.client.get(self.url + "/funnel").json()
+        self.assertEqual((body["reason"], body["tasks"]), ("NO_PREDICTION", []))
+        self.assertEqual(self.client.get(self.url + "/funnel?days=5").status_code, 422)
+        self.assertEqual(self.client.get(self.url + "/funnel?device=tv").status_code, 422)
+
+    def test_device_comes_from_width_only(self, _):
+        self.assertEqual((services.device_of(390), services.device_of(1280), services.device_of("x"),
+                          services.device_of(True)), ("mobile", "desktop", "", ""))

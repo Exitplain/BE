@@ -90,3 +90,21 @@ class MeasurementStepsView(BaseAPIView):
         if not 1 <= days <= 30:
             raise ApiError(422, "VALIDATION_ERROR", "days 는 1~30 이어야 합니다.", {"days": ["1~30"]})
         return Response({"project_id": project.pk, **services.steps(site, days)})
+
+
+class MeasurementFunnelView(BaseAPIView):
+    """GET /api/v1/projects/{id}/measurement/funnel?days=7&device=all — 과업별 실측 퍼널과 예측 비교 (R06·R07·R08)"""
+
+    def get(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        site = services.site_for(project)
+        if site is None:
+            raise ApiError(404, "NOT_FOUND", "아직 수집 스크립트를 발급하지 않았어요.")
+        days = request.query_params.get("days", "7")
+        device = request.query_params.get("device", "all")
+        if days not in {"7", "14", "30"}:
+            raise ApiError(422, "VALIDATION_ERROR", "days 는 7, 14, 30 중 하나입니다.", {"days": ["7, 14, 30"]})
+        if device not in services.DEVICES:
+            raise ApiError(422, "VALIDATION_ERROR", "device 는 all, mobile, desktop 중 하나입니다.",
+                           {"device": ["all, mobile, desktop"]})
+        return Response(services.funnel_dict(project, site, int(days), device))
