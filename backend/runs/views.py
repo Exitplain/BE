@@ -58,10 +58,12 @@ class ProjectRunListView(BaseAPIView):
 
 
 class RunCreateView(BaseAPIView):
-    """POST /api/v1/runs {plan_revision_id, base_run_id?, change_note?}  + 헤더 Idempotency-Key (P07~P10, P17)
+    """POST /api/v1/runs {plan_revision_id, base_run_id?, change_note?, reproduce?}  + 헤더 Idempotency-Key (P07~P10, P17, R09)
 
     202 {run_id, status, status_url}. 같은 Idempotency-Key 로 다시 보내면 새로 만들지 않고 기존 실행을 돌려준다
     (응답 헤더 Idempotent-Replayed: true). base_run_id 가 있으면 재테스트.
+    reproduce {task_id, segment_ids, stage_id?, stage_name?, seed_count?} 가 있으면 원인 재현(cause_repro):
+    base_run_id(비교한 완료 실행)가 필요하고, 그 과업 × 고른 세그먼트만 seed_count 번 돌린다.
     """
 
     def post(self, request):
@@ -75,9 +77,11 @@ class RunCreateView(BaseAPIView):
         ensure_owner(request.user, project)
         base_id = data["base_run_id"]
         parent = Run.objects.filter(pk=base_id).first() if base_id else None
+        reproduce = data.get("reproduce")
+        kind = Run.Kind.CAUSE_REPRO if reproduce else Run.Kind.RETEST if base_id else Run.Kind.PRETEST
         run, created = services.create_run(
             project, snapshot, request.user, idempotency_key=request.headers.get("Idempotency-Key"),
-            kind=Run.Kind.RETEST if base_id else Run.Kind.PRETEST, parent_run=parent, change_note=data["change_note"])
+            kind=kind, parent_run=parent, change_note=data["change_note"], scope=reproduce)
         response = Response({"run_id": str(run.id), "status": run.status,
                              "status_url": reverse("run-detail", args=[run.id])}, status=status.HTTP_202_ACCEPTED)
         if not created:

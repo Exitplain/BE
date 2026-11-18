@@ -76,13 +76,18 @@ def _validate_request(project, plan_snapshot, kind, parent_run):
     if plan_snapshot.plan.project_id != project.pk:
         raise ApiError(422, "PLAN_PROJECT_MISMATCH", "이 프로젝트의 계획이 아닙니다.",
                        {"plan_revision_id": ["이 프로젝트의 계획이 아닙니다."]})
-    if kind == Run.Kind.RETEST:
+    if kind in (Run.Kind.RETEST, Run.Kind.CAUSE_REPRO):
         if parent_run is None or parent_run.project_id != project.pk or parent_run.status not in RETEST_BASE_STATUSES:
-            raise ApiError(422, "INVALID_BASE_RUN", "완료된 이전 실행을 기준으로만 재테스트할 수 있어요.",
+            what = "원인 재현" if kind == Run.Kind.CAUSE_REPRO else "재테스트"
+            raise ApiError(422, "INVALID_BASE_RUN", f"완료된 이전 실행을 기준으로만 {what}할 수 있어요.",
                            {"base_run_id": ["완료된 이전 실행을 선택해주세요."]})
     elif parent_run is not None:
         raise ApiError(422, "INVALID_BASE_RUN", "재테스트에서만 이전 실행을 지정할 수 있어요.",
                        {"base_run_id": ["재테스트에서만 지정할 수 있어요."]})
+
+
+def _input_scope(scope):
+    return {"task_ids": [scope["task_id"]], "segment_ids": scope["segment_ids"], "seed_count": scope["seed_count"]}
 
 
 def _existing_by_key(project, key, plan_snapshot):
@@ -107,7 +112,8 @@ def _split_agent_run_id(agent_run_id, run_id):
     return task_id, int(seed)
 
 
-def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, parent_run, change_note, key):
+def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, parent_run, change_note, key,
+                scope=None):
     with transaction.atomic():
         locked = Project.objects.select_for_update().get(pk=project.pk)  # 번호 채번과 동시 실행 제한을 직렬화한다
         limit = settings.EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT
@@ -118,7 +124,8 @@ def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, par
             id=run_id, project=locked, created_by=created_by, sequence_no=sequence_no, kind=kind, parent_run=parent_run,
             change_note=change_note, plan_snapshot=plan_snapshot, idempotency_key=key,
             config={"policy": settings.AGENT_POLICY, "model": settings.AGENT_MODEL, "task_count": len(inputs),
-                    "expected_sessions": sum(len(i["personas"]) for i in inputs)})
+                    "expected_sessions": sum(len(i["personas"]) for i in inputs),
+                    **({"reproduce": scope} if scope else {})})
         task_runs = []
         for agent_input in inputs:
             task_id, seed = _split_agent_run_id(agent_input["run_id"], str(run_id))
@@ -130,7 +137,7 @@ def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, par
 
 
 def create_run(project, plan_snapshot, created_by, *, idempotency_key=None, kind=Run.Kind.PRETEST, parent_run=None,
-               change_note=""):
+               change_note="", scope=None):
     """확정된 계획으로 실행을 만든다. (run, created) 를 돌려준다.
 
     같은 Idempotency-Key 로 다시 부르면 새로 만들지 않고 기존 실행을 돌려준다 (created=False).
@@ -142,14 +149,15 @@ def create_run(project, plan_snapshot, created_by, *, idempotency_key=None, kind
         return existing, False
     run_id = uuid.uuid4()
     try:
-        inputs = build_run_inputs(plan_snapshot, run_id=str(run_id))
+        inputs = build_run_inputs(plan_snapshot, run_id=str(run_id),
+                                  scope=_input_scope(scope) if scope else None)
     except RunInputError as exc:
         raise ApiError(422, "RUN_INPUT_INVALID", str(exc)) from exc
     _check_targets(inputs)
     for _ in range(SEQUENCE_RETRIES):
         try:
             return _insert_run(project, plan_snapshot, created_by, run_id, inputs, kind=kind, parent_run=parent_run,
-                               change_note=change_note, key=key), True
+                               change_note=change_note, key=key, scope=scope), True
         except IntegrityError:
             if key and (existing := _existing_by_key(project, key, plan_snapshot)):
                 return existing, False  # 같은 요청이 동시에 들어와 다른 쪽이 먼저 만들었다
