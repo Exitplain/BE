@@ -21,10 +21,11 @@ PERSONA_MAX = 20                     # agent.schemas.RunInput.personas 상한과
 DEFAULT_SEGMENTS = [{"id": s, "count": c} for s, c in zip(SEGMENT_IDS, (3, 3, 2, 2))]
 
 # 실행 조건. Figma P05b: 모바일 390 · 동시 5세션 · 요청 간격 1초 · 시드 3회 · 스텝 40 · 5분 · 비용 상한(값 확인 필요)
+# 화면 너비는 팀 결정으로 기본 데스크톱 1280 (대부분 웹 사이트를 테스트하고, 데스크톱용 화면은 390 에서 깨진다). 새 테스트 P05b 에서 모바일 390 으로 바꿀 수 있다
 # 시드는 실행 비용 때문에 팀 결정으로 기본 1회 (사용자가 1~3회 선택)
 # 범위는 agent.schemas.RunInput 상한과 같게 둔다 (동시 실행 1~5, 요청 간격 0~5초).
 DEFAULT_LIMITS = {
-    "viewport_width": 390,
+    "viewport_width": 1280,
     "concurrency": 5,
     "request_interval_seconds": 1.0,
     "seed_count": 1,
