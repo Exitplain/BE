@@ -70,3 +70,16 @@ class RunInputTests(WizardMixin, TestCase):
     def test_without_demo_query(self, _):
         self.assertEqual(build_run_input(self.snapshot(), run_id="r", task_id="order")["target_url"],
                          "http://shop.local:8080/")
+
+class TargetUrlTests(TestCase):
+    def test_start_path_keeps_the_query_of_the_entered_url(self):
+        from plans.run_input import _target_url
+        site = {"entry_url": "https://banchanroad-demo.vercel.app/?variant=problem&case=all", "variant": "x"}
+        self.assertEqual(_target_url(site, {"start_path": "/"}),
+                         "https://banchanroad-demo.vercel.app/?variant=problem&case=all")
+        self.assertEqual(_target_url(site, {"start_path": "/cart"}),
+                         "https://banchanroad-demo.vercel.app/cart?variant=problem&case=all")
+        self.assertEqual(_target_url(site, {"start_path": "/cart?step=2"}),          # 시작 화면 자체 쿼리가 먼저
+                         "https://banchanroad-demo.vercel.app/cart?step=2")
+        self.assertEqual(_target_url({"entry_url": "http://shop.local:8080/"}, {"start_path": "/"}),
+                         "http://shop.local:8080/")
