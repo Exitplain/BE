@@ -317,3 +317,5 @@ artifacts/
 *.pdf
 .DS_Store
 node_modules/
+# 코드 연결로 받은 코드 (EXITPLAIN_SOURCE_ROOT 기본값)
+source_snapshots/

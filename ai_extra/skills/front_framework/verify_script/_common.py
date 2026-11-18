@@ -11,14 +11,17 @@ FF = HERE.parent
 REPO = FF.parents[2]
 sys.path.insert(0, str(FF))
 
-SOURCES = ("detect_framework.py", "extract_routes.py", "gen_fixture.py")
+# 분석기 본체는 agent/source 로 옮겼다 (ai_extra 의 같은 이름 파일은 호환용 shim)
+ANALYZER = REPO / "agent" / "source"
+SOURCES = (ANALYZER / "detect_framework.py", ANALYZER / "extract_routes.py", ANALYZER / "static_site.py",
+           FF / "gen_fixture.py")
 EXIT = {"pass": 0, "fail": 1, "blocked": 2}
 
 
 def source_sha256():
     h = hashlib.sha256()
-    for name in SOURCES:
-        h.update((FF / name).read_bytes())
+    for path in SOURCES:
+        h.update(path.read_bytes())
     return h.hexdigest()
 
 
