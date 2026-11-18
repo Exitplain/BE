@@ -1,7 +1,10 @@
 """K01 조정안·K02 적용·K03b 이력·되돌리기 API (CAL-05~14)."""
 from unittest.mock import patch
 
+import json
+
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from calibrations.models import CalibrationRevision
 from common.testing import WizardMixin, fake_discovery
@@ -195,13 +198,16 @@ class ObservationTests(WizardMixin, TestCase):
         body = self.client.get(self.url).json()
         self.assertEqual(body["tasks"][0]["predicted"],
                          {"outcome": "dropout", "stage_id": "/cart", "stage_name": "장바구니", "cause": "cost",
-                          "cause_name": "비용 충격"})
+                          "cause_name": "비용 충격", "pain_top": []})
         rows = {r["participant_code"]: r["match"] for r in body["items"]}
-        self.assertEqual(rows["H-001"], {"outcome": True, "stage": True, "cause": True})
-        self.assertEqual(rows["H-002"], {"outcome": False, "stage": None, "cause": None})
-        self.assertEqual(rows["H-003"], {"outcome": True, "stage": False, "cause": None})   # 원인 미상은 원인 분모에서 뺌
+        self.assertEqual(rows["H-001"], {"outcome": True, "stage": True, "cause": True, "pain_screen": None, "pain_cause": None})
+        self.assertEqual(rows["H-002"], {"outcome": False, "stage": None, "cause": None, "pain_screen": None, "pain_cause": None})
+        self.assertEqual(rows["H-003"], {"outcome": True, "stage": False, "cause": None, "pain_screen": None,
+                                          "pain_cause": None})   # 원인 미상은 원인 분모에서 뺌
         self.assertEqual(body["summary"], {"outcome": {"matched": 2, "total": 3}, "stage": {"matched": 1, "total": 2},
-                                           "cause": {"matched": 1, "total": 1}})
+                                           "cause": {"matched": 1, "total": 1},
+                                           "pain_screen": {"matched": 0, "total": 0},
+                                           "pain_cause": {"matched": 0, "total": 0}})
         again = self.post(participant_code="H-002", outcome="dropout", stage_id="/cart", cause="trust")
         self.assertEqual((again.status_code, again.json()["replaced"]), (200, True))
         self.assertEqual(len(again.json()["items"]), 3)
@@ -239,3 +245,89 @@ class ObservationTests(WizardMixin, TestCase):
         self.assertEqual(self.client.delete(f"/api/v1/human-observations/{row['id']}").status_code, 403)
         self.client.force_login(self.user)
         self.assertEqual(self.client.delete(f"/api/v1/human-observations/{row['id']}").status_code, 204)
+
+
+SCREENS = {"order": {"/": {"sessions": 0, "causes": [], "shot": None},
+                     "/cart": {"sessions": 9, "causes": ["cost", "navigation"], "shot": 101},
+                     "/order/success": {"sessions": 2, "causes": ["trust"], "shot": None}}}
+
+
+@patch("calibrations.observations._screens_by_task", return_value=SCREENS)
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class ParticipantLinkTests(WizardMixin, TestCase):
+    """참여자 응답 링크 (PART-01~06): 로그인 없이 누르기만 해서 답하고, 사람 관측으로 쌓인다."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = f"/api/v1/projects/{self.project.id}"
+        self.public = APIClient()
+
+    def report(self):
+        ObservationTests.report(self)
+
+    def make(self, **body):
+        res = self.client.post(f"{self.base}/participant-links", {"task_id": "order", **body}, format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+        return res.json()
+
+    def answer(self, token, **body):
+        return self.public.post(f"/api/v1/participant-links/{token}/responses",
+                                {"client_id": "browser-0001", **body}, format="json")
+
+    def test_public_page_shows_only_task_screens_and_choices(self, *_):
+        self.report()
+        link = self.make(purpose="evaluation", max_responses=2)
+        self.assertEqual((link["path"][:3], link["state"], link["task_name"]), ("/r/", "open", "첫 주문"))
+        page = self.public.get(f"/api/v1/participant-links/{link['token']}")
+        self.assertEqual(page.status_code, 200, page.content)
+        body = page.json()
+        self.assertEqual([s["id"] for s in body["screens"]], ["/", "/cart", "/order/success"])
+        self.assertEqual(body["screens"][1]["screenshot_url"],
+                         f"/api/v1/participant-links/{link['token']}/screens/101")
+        self.assertEqual(len(body["reasons"]), 8)
+        self.assertNotIn("pain_top", json.dumps(body))                        # 예측 수치는 보이지 않는다
+        # 다른 캡처 번호는 열 수 없다
+        self.assertEqual(self.public.get(f"/api/v1/participant-links/{link['token']}/screens/999").status_code, 404)
+
+    def test_answers_become_observations_and_compare_with_model_friction(self, *_):
+        self.report()
+        link = self.make(purpose="evaluation", max_responses=2)
+        first = self.answer(link["token"], outcome="success", pain_stage_id="/cart", pain_cause="cost", discomfort=3)
+        self.assertEqual((first.status_code, first.json()["participant_code"]), (201, "R-001"))
+        again = self.answer(link["token"], outcome="success")
+        self.assertEqual((again.status_code, again.json()["error"]["code"]), (409, "ALREADY_SUBMITTED"))
+        second = self.public.post(f"/api/v1/participant-links/{link['token']}/responses",
+                                  {"client_id": "browser-0002", "outcome": "dropout", "pain_stage_id": "/",
+                                   "pain_cause": "trust", "discomfort": 5}, format="json")
+        self.assertEqual(second.status_code, 201, second.content)
+        full = self.answer(link["token"], outcome="success")
+        self.assertEqual((full.status_code, full.json()["error"]["code"]), (410, "LINK_FULL"))
+
+        body = self.client.get(f"{self.base}/human-observations").json()
+        rows = {r["participant_code"]: r for r in body["items"]}
+        self.assertEqual((rows["R-001"]["source"], rows["R-001"]["purpose"], rows["R-001"]["discomfort"]),
+                         ("participant_link", "evaluation", 3))
+        self.assertEqual((rows["R-001"]["match"]["pain_screen"], rows["R-001"]["match"]["pain_cause"]), (True, True))
+        self.assertEqual((rows["R-002"]["stage_id"], rows["R-002"]["cause"]), ("/", "trust"))   # 그만둔 화면 = 고른 화면
+        self.assertEqual((rows["R-002"]["match"]["pain_screen"], rows["R-002"]["match"]["pain_cause"]), (False, False))
+        self.assertEqual(body["summary"]["pain_screen"], {"matched": 1, "total": 2})
+        self.assertEqual(body["tasks"][0]["predicted"]["pain_top"], ["/cart", "/order/success"])
+        links = self.client.get(f"{self.base}/participant-links").json()["items"]
+        self.assertEqual((links[0]["responses"], links[0]["state"]), (2, "full"))
+
+    def test_validation_disable_and_owner_only(self, *_):
+        self.assertEqual(self.client.post(f"{self.base}/participant-links", {"task_id": "order"},
+                                          format="json").status_code, 409)       # 사전 테스트 없음
+        self.report()
+        link = self.make()
+        for body in ({"outcome": "dropout"}, {"outcome": "success", "discomfort": 9},
+                     {"outcome": "success", "pain_cause": "mood"}, {"outcome": "success", "note": "글"}):
+            with self.subTest(body=body):
+                self.assertEqual(self.answer(link["token"], **body).status_code, 422)
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(f"/api/v1/participant-links/{link['id']}/disable").status_code, 403)
+        self.client.force_login(self.user)
+        closed = self.client.post(f"/api/v1/participant-links/{link['id']}/disable").json()
+        self.assertEqual(closed["state"], "disabled")
+        self.assertEqual(self.public.get(f"/api/v1/participant-links/{link['token']}").status_code, 410)
+        self.assertEqual(self.public.get("/api/v1/participant-links/nope").status_code, 404)

@@ -13,4 +13,13 @@ urlpatterns = [
     path("projects/<int:project_id>/human-observations/import", views.ObservationImportView.as_view(),
          name="human-observations-import"),
     path("human-observations/<int:observation_id>", views.ObservationDetailView.as_view(), name="human-observation"),
+    path("projects/<int:project_id>/participant-links", views.ParticipantLinkListView.as_view(),
+         name="participant-links"),
+    path("participant-links/<int:link_id>/disable", views.ParticipantLinkDisableView.as_view(),
+         name="participant-link-disable"),
+    path("participant-links/<str:token>", views.PublicParticipantView.as_view(), name="participant-public"),
+    path("participant-links/<str:token>/responses", views.PublicParticipantResponseView.as_view(),
+         name="participant-responses"),
+    path("participant-links/<str:token>/screens/<int:observation_id>", views.PublicParticipantScreenView.as_view(),
+         name="participant-screen"),
 ]

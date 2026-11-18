@@ -41,6 +41,7 @@ class HumanObservation(models.Model):
     class Source(models.TextChoices):
         MANUAL = "manual", "직접 입력"
         RECORDER = "recorder", "기록 장치(recorder.js) 가져오기"
+        PARTICIPANT_LINK = "participant_link", "참여자 응답 링크"
 
     project = models.ForeignKey(settings.EXITPLAIN_PROJECT_MODEL, on_delete=models.CASCADE,
                                 related_name="human_observations")
@@ -49,8 +50,12 @@ class HumanObservation(models.Model):
     outcome = models.CharField(max_length=8, choices=Outcome.choices)
     stage_id = models.CharField(max_length=300, blank=True, default="")   # 멈춘 화면 경로 (이탈만)
     cause = models.CharField(max_length=20, blank=True, default="")       # behavior.CAUSES 또는 unknown (이탈만)
+    # 가장 불편했던 화면·이유·정도 (PART-03·07). 끝까지 한 참여자도 답한다. 화면이 없으면 "특별히 없었어요"
+    pain_stage_id = models.CharField(max_length=300, blank=True, default="")
+    pain_cause = models.CharField(max_length=20, blank=True, default="")   # behavior.CAUSES 또는 unknown
+    discomfort = models.PositiveSmallIntegerField(null=True, blank=True)   # 1~5
     purpose = models.CharField(max_length=12, choices=Purpose.choices, default=Purpose.CALIBRATION)
-    source = models.CharField(max_length=10, choices=Source.choices, default=Source.MANUAL)
+    source = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -59,3 +64,36 @@ class HumanObservation(models.Model):
         ordering = ["participant_code", "task_id"]
         constraints = [models.UniqueConstraint(fields=["project", "participant_code", "task_id"],
                                                name="uniq_human_observation")]
+
+
+class ParticipantLink(models.Model):
+    """참여자 응답 링크 (PART-01). 로그인 없이 /r/{token} 으로 열리고, 응답은 사람 관측으로 저장된다.
+
+    고객 사이트에는 아무것도 넣지 않는다. 참여자는 링크에서 사이트를 새 탭으로 열고, 돌아와 누르기만 해서 답한다.
+    """
+    project = models.ForeignKey(settings.EXITPLAIN_PROJECT_MODEL, on_delete=models.CASCADE,
+                                related_name="participant_links")
+    token = models.CharField(max_length=40, unique=True)
+    task_id = models.CharField(max_length=80)
+    purpose = models.CharField(max_length=12, choices=HumanObservation.Purpose.choices,
+                               default=HumanObservation.Purpose.CALIBRATION)
+    expires_at = models.DateTimeField()
+    max_responses = models.PositiveIntegerField(default=50)
+    responses = models.PositiveIntegerField(default=0)
+    disabled_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ParticipantSubmission(models.Model):
+    """같은 브라우저의 중복 제출을 막는 기록 (브라우저가 만든 임의 값만 남긴다. IP·user agent 는 남기지 않는다)."""
+    link = models.ForeignKey(ParticipantLink, on_delete=models.CASCADE, related_name="submissions")
+    client_id = models.CharField(max_length=64)
+    observation = models.ForeignKey(HumanObservation, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["link", "client_id"], name="uniq_participant_submission")]
