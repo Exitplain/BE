@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     'runs',
     'testaccounts',
     'sources',
+    'measurements',
 ]
 
 MIDDLEWARE = [
@@ -226,6 +227,13 @@ EXITPLAIN_DISCOVERY_MODE = os.environ.get('EXITPLAIN_DISCOVERY_MODE', 'demo')
 EXITPLAIN_DISCOVERY_BACKGROUND = os.environ.get('EXITPLAIN_DISCOVERY_BACKGROUND', 'true').lower() != 'false'
 # 서버 전체에서 동시에 둘러볼 수 있는 사이트 수 (브라우저 메모리). 넘으면 429 DISCOVERY_BUSY
 EXITPLAIN_DISCOVERY_MAX_ACTIVE = int(os.environ.get('EXITPLAIN_DISCOVERY_MAX_ACTIVE', 2))
+
+# --- 실측 수집 (measurements, R01~R05) ---
+# 고객 사이트에 넣을 스크립트 주소의 앞부분. 비우면 요청 주소를 쓴다. Vercel rewrites 뒤라면 https 프런트 주소를 넣는다
+# (http IP 를 넣으면 https 사이트에서 mixed content 로 막힌다). 예) EXITPLAIN_PUBLIC_URL=https://exitplain.vercel.app
+EXITPLAIN_PUBLIC_URL = os.environ.get('EXITPLAIN_PUBLIC_URL', '')
+# 사이트 하나가 1분에 보낼 수 있는 수집 건수. 넘으면 조용히 버린다
+EXITPLAIN_MEASURE_PER_MINUTE = int(os.environ.get('EXITPLAIN_MEASURE_PER_MINUTE', 600))
 
 # --- 코드 연결 (sources, 기능명세서 SRC-01~03) ---
 # 받은 코드를 두는 폴더 (artifacts 와 분리: 스크린샷 API 로 내보내지지 않게). 커밋 금지
