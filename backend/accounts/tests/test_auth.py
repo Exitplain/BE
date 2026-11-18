@@ -163,7 +163,7 @@ class WorkspaceSettingsTests(TestCase):
         body = self.client.get("/api/v1/workspace").json()
         self.assertEqual(body["workspace"]["name"], "u의 워크스페이스")
         self.assertEqual(body["me"]["email"], "u@example.com")
-        self.assertEqual(body["run_defaults"]["viewport_width"], 390)
+        self.assertEqual(body["run_defaults"]["viewport_width"], 1280)
 
     def test_patch_names(self):
         res = self.client.patch("/api/v1/workspace", {"workspace_name": "반찬로드 팀", "my_name": "정은"},
