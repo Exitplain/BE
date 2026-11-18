@@ -48,6 +48,14 @@ def _own_report(request, report_id):
     return report
 
 
+class ReportScreensView(BaseAPIView):
+    """GET /api/v1/reports/{id}/screens — 화면 둘러보기·문제가 있었던 화면·원인 분포(감지된 마찰). 캡처 URL 포함"""
+
+    def get(self, request, report_id):
+        from .screens import report_screens
+        return Response(report_screens(_own_report(request, report_id)))
+
+
 class ReportSessionListView(BaseAPIView):
     """GET /api/v1/reports/{id}/sessions?task_id=&seed=&status=&kind=&segment_id= — 세션 목록"""
 

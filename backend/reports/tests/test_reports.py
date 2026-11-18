@@ -148,6 +148,13 @@ class ReportTests(WizardMixin, TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get("/api/v1/runs/run1/reports").status_code, 403)
 
+    def test_screens_of_a_sample_folder_report_say_no_screenshots(self, _):
+        snap = self.snapshot()
+        self.write_all(snap)
+        report = create_report_from_run_dir(snap, self.root, run_ref="run1", user=self.user)
+        body = self.client.get(f"/api/v1/reports/{report.id}/screens").json()
+        self.assertEqual((body["available"], body["reason"], body["tasks"]), (False, "NO_SCREENSHOTS", []))
+
     def test_management_command(self, _):
         snap = self.snapshot()
         self.write_all(snap)

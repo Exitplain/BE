@@ -66,6 +66,37 @@ class RunReportTests(WizardMixin, TestCase):
         # A의 실행 목록이 run_ref로 이 리포트를 찾는다
         self.assertEqual(latest_report_summaries([run.id])[str(run.id)]["id"], str(report.id))
 
+    def test_screens_walkthrough_counts_frictions_of_all_sessions_with_screenshots(self):
+        run = self.finished_run()
+        report = ReportSnapshot.objects.get(run=run)
+        res = self.client.get(f"/api/v1/reports/{report.id}/screens")
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertTrue(body["available"])
+        order = next(t for t in body["tasks"] if t["task_id"] == "order")
+        screens = order["screens"]
+        self.assertEqual([(s["screen_id"], s["name"], s["reached"]) for s in screens],
+                         [("/", "반찬로드", 20), ("/product", "이번 주 식탁", 20), ("/cart", "장바구니", 20)])
+        for s in screens:                                                  # 모든 화면에 실제 캡처가 붙는다
+            self.assertRegex(s["screenshot_url"], r"^/api/v1/observations/\d+/screenshot$")
+        product = screens[1]
+        # 가짜 에이전트: 20세션 모두 /product 에서 입력 부담을 겪고, 그중 10세션만 이탈 (성공한 세션의 마찰도 센다)
+        self.assertEqual(product["friction_sessions"], 20)
+        friction = product["frictions"][0]
+        self.assertEqual((friction["name"], friction["sessions"], friction["dropouts"], friction["detail"]),
+                         ("입력 부담", 20, 10, "필수 입력 7칸 (허용 6칸)"))
+        self.assertEqual(screens[2]["dropouts_here"], 10)
+        self.assertEqual(order["problems"][0]["screen_id"], "/product")    # 마찰이 가장 많은 화면이 먼저
+        self.assertEqual(order["causes"], [{
+            "category": "input_burden", "name": "입력 부담", "sessions": 20, "dropouts": 10,
+            "screens": [{"screen_id": "/product", "name": "이번 주 식탁", "sessions": 20,
+                         "screenshot_url": friction["screenshot_url"]}]}])
+        shot = self.client.get(friction["screenshot_url"])
+        self.assertEqual(shot.status_code, 200)
+        b"".join(shot.streaming_content)
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(f"/api/v1/reports/{report.id}/screens").status_code, 403)
+
     def test_session_detail_reads_db_and_uses_screenshot_api(self):
         run = self.finished_run()
         report = ReportSnapshot.objects.get(run=run)
