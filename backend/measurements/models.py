@@ -24,11 +24,12 @@ class MeasureSite(models.Model):
 
 
 class MeasureHit(models.Model):
-    """실제 방문자의 화면 이동 1건. 익명 세션 id(sid)·경로·선택 단계 이름만 남긴다 (입력값·쿠키·IP 없음)."""
+    """실제 방문자의 화면 이동 1건. 익명 세션 id(sid)·경로·선택 단계 이름·화면 너비 구분만 남긴다 (입력값·쿠키·IP 없음)."""
     site = models.ForeignKey(MeasureSite, on_delete=models.CASCADE, related_name="hits")
     sid = models.CharField(max_length=40)
     path = models.CharField(max_length=300)
     step = models.CharField(max_length=64, blank=True, default="")
+    device = models.CharField(max_length=8, blank=True, default="")   # mobile | desktop | "" (화면 너비로만 나눔)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

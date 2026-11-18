@@ -1,6 +1,6 @@
 /* Exitplain 실측 수집 스크립트 (R01). 사이트 <head> 에
  *   <script src="https://<exitplain>/api/v1/e.js" data-project="ep_..." async></script>
- * 를 넣으면 화면 이동마다 {key, sid, path, step?} 만 보낸다.
+ * 를 넣으면 화면 이동마다 {key, sid, path, step?, w(화면 너비)} 만 보낸다.
  *
  * 보내지 않는 것: 입력값, 쿠키, 쿼리 문자열, 화면 글자, 마우스 위치. sid 는 탭마다 새로 만드는 랜덤 값(sessionStorage).
  * 자동화 브라우저(navigator.webdriver, 우리 에이전트 포함)는 수집하지 않는다. 실측에 모의 방문이 섞이지 않게.
@@ -48,7 +48,7 @@
     var path = currentPath();
     if (path === last) return;
     last = path;
-    send({ key: key, sid: sid, path: path });
+    send({ key: key, sid: sid, path: path, w: window.innerWidth });
   }
 
   var push = history.pushState;
@@ -68,7 +68,7 @@
 
   window.exitplain = window.exitplain || {};
   window.exitplain.step = function (name) {
-    if (typeof name === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(name)) send({ key: key, sid: sid, path: currentPath(), step: name });
+    if (typeof name === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(name)) send({ key: key, sid: sid, path: currentPath(), step: name, w: window.innerWidth });
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", view);
