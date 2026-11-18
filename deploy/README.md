@@ -42,7 +42,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now exitplain-web
 sudo systemctl enable --now exitplain-worker   # run_worker 구현됨 (대기 중인 실행을 가져와 에이전트를 돌린다)
 
-chmod +x deploy.sh && ./deploy.sh        # 이후 배포는 이 한 줄
+./deploy.sh        # 이후 배포는 이 한 줄 (실행 권한은 저장소에 들어 있다. 서버에서 chmod 하면 git 이 로컬 변경으로 보고 pull 을 멈춘다)
 ```
 `deploy.sh`가 `sudo systemctl restart`를 비밀번호 없이 쓰려면 ubuntu 계정에 sudo 권한이 필요하다(EC2 기본값은 가능).
 
