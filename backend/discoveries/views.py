@@ -11,12 +11,19 @@ from .serializers import DiscoveryCreateSerializer, discovery_dict
 
 
 class ProjectDiscoveryCreateView(BaseAPIView):
-    """POST /api/v1/projects/{project_id}/discoveries — P02 사이트 확인 + P03 기능 탐색"""
+    """POST /api/v1/projects/{project_id}/discoveries — P02 사이트 확인 + P03 기능 탐색
+
+    `Prefer: respond-async` 헤더가 있으면 status=running 으로 바로 202 를 돌려주고, 진행 피드·결과는 GET 으로 읽는다.
+    없으면 끝날 때까지 기다렸다가 201 (기존 동작).
+    """
 
     def post(self, request, project_id):
         project = get_owned_project(request.user, project_id)
         serializer = DiscoveryCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if "respond-async" in request.headers.get("Prefer", ""):
+            discovery = services.start_discovery(request.user, project, serializer.validated_data)
+            return Response(discovery_dict(discovery), status=status.HTTP_202_ACCEPTED)
         discovery = services.create_discovery(request.user, project, serializer.validated_data)
         return Response(discovery_dict(discovery), status=status.HTTP_201_CREATED)
 
@@ -29,4 +36,4 @@ class DiscoveryDetailView(BaseAPIView):
         if discovery is None:
             raise ApiError(404, "NOT_FOUND", "탐색 결과를 찾을 수 없습니다.")
         ensure_owner(request.user, discovery.project)
-        return Response(discovery_dict(discovery))
+        return Response(discovery_dict(services.mark_if_stale(discovery)))

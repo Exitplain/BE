@@ -47,8 +47,15 @@ def site():
 
 
 async def test_crawl_follows_links_and_buttons_without_writing():
+    events = []
     with site() as (base, writes):
-        pages, blocked = await crawl(base + "/", [base], max_pages=10, max_depth=2)
+        pages, blocked = await crawl(base + "/", [base], max_pages=10, max_depth=2, progress=events.append)
+    kinds = [e["kind"] for e in events]
+    assert kinds[0] == "browser_started" and kinds.count("page_read") == 4              # 진행 피드: 연 화면마다 한 줄
+    assert {"kind": "button_moved", "label": "요금제 보기", "path": "/pricing"}.items() <= next(
+        e for e in events if e["kind"] == "button_moved").items()
+    assert any(e["kind"] == "write_blocked" and e["path"] == "/api/save" for e in events)
+    assert all(e["message"] and base not in e["message"] for e in events)               # 문장에 서버 주소를 넣지 않는다
     paths = [p["path"] for p in pages]
     assert paths[0] == "/" and set(paths) == {"/", "/notes", "/notes/1", "/pricing"}     # 링크 + 버튼으로 간 화면
     home = pages[0]
@@ -110,9 +117,13 @@ def login_site():
 
 
 async def test_crawl_logged_in_relogs_after_logout_and_keeps_secrets_out():
+    events = []
     with login_site() as (base, writes):
         login = {"url": base + "/login", "username": USER, "password": SECRET}
-        pages, blocked = await crawl(base + "/", [base], login=login)
+        pages, blocked = await crawl(base + "/", [base], login=login, progress=events.append)
+    assert [e["kind"] for e in events][:3] == ["browser_started", "login_started", "login_succeeded"]
+    assert any(e["kind"] == "relogin" for e in events)
+    assert SECRET not in str(events) and USER not in str(events)
     paths = [p["path"] for p in pages]
     assert paths[0] == "/home" and "/notes" in paths and "/login" not in paths      # 로그인 뒤 첫 화면부터
     assert blocked["relogins"] >= 1                                                  # 로그아웃 버튼 뒤 다시 로그인

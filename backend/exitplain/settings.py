@@ -221,10 +221,15 @@ EXITPLAIN_DISCOVERY_TTL_SECONDS = 900
 # 사이트 확인 방식. demo(기본): 로컬 데모 쇼핑몰의 정해진 기능·과업. explore: 입력한 URL을 읽기 전용으로 둘러보고
 # 기능·과업을 모델이 제안한다 (agent/explore.py, ANTHROPIC_API_KEY 필요, 과업은 말로 쓴 성공 기준을 쓴다)
 EXITPLAIN_DISCOVERY_MODE = os.environ.get('EXITPLAIN_DISCOVERY_MODE', 'demo')
+# 비동기 사이트 확인(Prefer: respond-async)을 웹 프로세스의 백그라운드 스레드로 돌릴지. False 면 요청 안에서 끝까지 돈다(테스트)
+EXITPLAIN_DISCOVERY_BACKGROUND = os.environ.get('EXITPLAIN_DISCOVERY_BACKGROUND', 'true').lower() != 'false'
+# 서버 전체에서 동시에 둘러볼 수 있는 사이트 수 (브라우저 메모리). 넘으면 429 DISCOVERY_BUSY
+EXITPLAIN_DISCOVERY_MAX_ACTIVE = int(os.environ.get('EXITPLAIN_DISCOVERY_MAX_ACTIVE', 2))
 # 리포트 실행 퍼널 단계의 화면 역할 이름 ('/product' → '상품 상세'). auto: ANTHROPIC_API_KEY 가 있으면 Claude, off: 끔
 EXITPLAIN_STAGE_NAMER = os.environ.get('EXITPLAIN_STAGE_NAMER', 'auto')
 if len(sys.argv) > 1 and sys.argv[1] == 'test':
     EXITPLAIN_STAGE_NAMER = 'off'   # 테스트는 개발자 PC에 키가 있어도 실제 API 를 부르지 않는다
+    EXITPLAIN_DISCOVERY_BACKGROUND = False   # 테스트 DB 트랜잭션 밖의 스레드는 결과를 볼 수 없다
 # 페르소나 생성 함수 경로. None이면 Figma P07 예시값(fixture) 사용. personas/generators.py 참고
 # 비우면 규칙 기반(rules-v1). LLM 생성기: personas.llm.generate (ANTHROPIC_API_KEY 필요, 모델은 EXITPLAIN_PERSONA_MODEL)
 EXITPLAIN_PERSONA_GENERATOR = os.environ.get('EXITPLAIN_PERSONA_GENERATOR') or None

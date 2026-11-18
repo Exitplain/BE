@@ -84,6 +84,8 @@ def create_plan(user, project, discovery_id):
     discovery = Discovery.objects.filter(pk=discovery_id, project=project).first()
     if discovery is None:
         raise validation_error("discovery_id", "이 프로젝트의 탐색 결과가 아닙니다.")
+    if discovery.status != Discovery.Status.SUCCEEDED:
+        raise ApiError(409, "DISCOVERY_NOT_READY", "사이트 확인이 끝나지 않았거나 실패했습니다. 결과를 확인한 뒤 진행해주세요.")
     if discovery.is_expired:
         raise ApiError(409, "DISCOVERY_EXPIRED", "사이트 확인 결과가 만료됐습니다. 1단계에서 다시 확인해주세요.")
     task_ids = [t["id"] for t in discovery.tasks if t.get("suggested")]

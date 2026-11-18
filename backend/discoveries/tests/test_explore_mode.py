@@ -1,5 +1,5 @@
 """사이트 확인 explore 모드: 입력 URL을 둘러본 결과(기능·과업, 말로 쓴 성공 기준)가 계획·실행 입력까지 이어지는지."""
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.test import TestCase, override_settings
 
@@ -28,7 +28,7 @@ class ExploreModeTests(WizardMixin, TestCase):
     def test_explored_tasks_flow_into_run_input_with_success_criteria(self, _):
         with patch("discoveries.services.run_exploration", return_value=EXPLORED) as explore:
             discovery = self.discover()
-        explore.assert_called_once_with("http://shop.local:8080/", ["http://shop.local:8080"], login=None)
+        explore.assert_called_once_with("http://shop.local:8080/", ["http://shop.local:8080"], login=None, progress=ANY)
         self.assertEqual((discovery["variant"], discovery["tasks"][0]["success_criteria"]),
                          ("explore", "이메일·비밀번호 입력칸이 있는 회원가입 폼이 보인다"))
         plan = self.client.post(f"/api/v1/projects/{self.project.id}/plans", {"discovery_id": discovery["id"]},

@@ -46,12 +46,29 @@ def _path(url):
     return urlsplit(url).path or "/"
 
 
-async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=(1280, 800), login=None):
+def _short(text, limit=40):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _emit(progress, kind, message, **data):
+    """진행 사건 하나를 알린다. 화면에 그대로 보여 줄 문장이라 계정 값·서버 경로·쿼리 문자열은 넣지 않는다.
+    알림이 실패해도 둘러보기는 계속한다."""
+    if progress is None:
+        return
+    try:
+        progress({"kind": kind, "message": message, **{k: v for k, v in data.items() if v is not None}})
+    except Exception:
+        pass
+
+
+async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=(1280, 800), login=None, progress=None):
     """읽기 전용 둘러보기. [{path, depth, title, headings, links, buttons, forms, text}] (방문 순서).
 
     login: {"url", "username", "password"} 테스트 계정. 있으면 먼저 로그인하고 로그인 뒤 첫 화면부터 둘러본다.
     로그인 요청만 쓰기를 허용한다. 둘러보다 로그인 화면으로 튕기면(로그아웃 버튼 등) 다시 로그인하고 그 길은 적지 않는다.
     계정 값은 메모리에만 두고 결과·로그에 남기지 않는다.
+    progress: 진행 사건을 받는 함수({kind, message, path?, ...}). 사용자에게 보여 줄 진행 피드용이다.
     """
     from playwright.async_api import async_playwright
     from .browser import login as sign_in_form
@@ -64,6 +81,7 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
         browser = await p.chromium.launch()
         try:
             context = await browser.new_context(viewport={"width": viewport[0], "height": viewport[1]}, service_workers="block")
+            _emit(progress, "browser_started", "브라우저를 열었어요")
 
             async def guard(route):
                 request = route.request
@@ -72,6 +90,8 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                     await route.abort()
                 elif request.method not in SAFE_METHODS and not logging_in[0]:
                     blocked["writes"] += 1
+                    _emit(progress, "write_blocked", f"{request.method} {_short(_path(request.url))} 요청은 저장·결제가 일어날 수 있어 막았어요",
+                          method=request.method, path=_path(request.url))
                     await route.abort()
                 else:
                     await route.continue_()
@@ -93,18 +113,23 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                 if not login or _path(page.url) != login_path:
                     return False
                 blocked["relogins"] += 1
+                _emit(progress, "relogin", "로그인이 풀려서 테스트 계정으로 다시 로그인해요")
                 if not await sign_in():
                     raise ValueError("테스트 계정으로 다시 로그인하지 못했습니다.")
                 return True
 
             if login:
+                _emit(progress, "login_started", "테스트 계정으로 로그인하는 중이에요")
                 if not await sign_in():
                     raise ValueError("테스트 계정으로 로그인하지 못했습니다.")
                 start = page.url.split("#")[0]           # 로그인 뒤 첫 화면 (예: /home)
                 seen = {login_path, _path(start)}
                 queue = deque([(start, 0)])
+                _emit(progress, "login_succeeded", "로그인했어요", path=_path(start))
             while queue and len(pages) < max_pages:
                 url, depth = queue.popleft()
+                _emit(progress, "page_opening", f"{_short(_path(url))} 화면을 여는 중이에요 ({len(pages) + 1}/{max_pages})",
+                      path=_path(url), depth=depth)
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                     await page.wait_for_timeout(1200)          # SPA 렌더링 대기
@@ -114,10 +139,13 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                 except ValueError:
                     raise
                 except Exception:
+                    _emit(progress, "page_failed", f"{_short(_path(url))} 화면을 열지 못해 건너뛰었어요", path=_path(url))
                     continue
                 if _origin(page.url) not in allowed_origins:
+                    _emit(progress, "page_left_site", "다른 사이트로 넘어가는 화면이라 건너뛰었어요", path=_path(url))
                     continue
                 links = []
+                queued = 0
                 for link in snap.pop("links"):
                     href = urljoin(page.url, link["href"])
                     if _origin(href) not in allowed_origins or _path(href).lower().endswith(SKIP_SUFFIXES):
@@ -126,7 +154,12 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                     if depth < max_depth and _path(href) not in seen:
                         seen.add(_path(href))
                         queue.append((href.split("#")[0], depth + 1))
+                        queued += 1
                 here = page.url
+                _emit(progress, "page_read", f"'{_short(snap['title'] or _path(here))}' 화면을 읽었어요 · 같은 사이트 링크 {len(links)}개"
+                      + (f", 새로 볼 화면 {queued}개" if queued else ""),
+                      path=_path(here), title=_short(snap["title"], 60), links=len(links), queued=queued,
+                      buttons=len(snap["buttons"]))
                 # 버튼으로만 화면을 넘기는 사이트(SPA)를 위해 버튼을 눌러 보고 어느 화면으로 가는지 적는다.
                 # 쓰기 요청은 막혀 있어 저장·가입·결제는 일어나지 않는다. 누른 뒤 화면을 다시 연다.
                 if depth < max_depth:
@@ -146,6 +179,8 @@ async def crawl(entry_url, allowed_origins, max_pages=10, max_depth=2, viewport=
                         target = page.url
                         if _origin(target) in allowed_origins and _path(target) != _path(here):
                             links.append({"label": label, "path": _path(target), "via": "button"})
+                            _emit(progress, "button_moved", f"'{_short(label)}' 버튼을 눌러 보니 {_short(_path(target))} 화면으로 가요",
+                                  label=_short(label, 60), path=_path(target))
                             if _path(target) not in seen:
                                 seen.add(_path(target))
                                 queue.append((target.split("#")[0], depth + 1))
@@ -244,15 +279,23 @@ def propose(pages, entry_url, client=None, logged_in=False):
     return proposal
 
 
-async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, max_depth=2, login=None):
+async def discover_url(entry_url, allowed_origins, client=None, max_pages=10, max_depth=2, login=None, progress=None):
     """agent.preflight.discover_site 와 같은 모양의 결과. 과업은 success_criteria·start_path 를 쓴다.
 
-    login 이 있으면 로그인한 상태로 둘러보고, 과업은 로그인한 사용자가 할 일로 제안한다 (requires_login=True)."""
+    login 이 있으면 로그인한 상태로 둘러보고, 과업은 로그인한 사용자가 할 일로 제안한다 (requires_login=True).
+    progress 는 crawl 과 같다. 둘러보기 뒤 모델 제안 시작·끝도 알린다."""
     import asyncio
-    pages, blocked = await crawl(entry_url, allowed_origins, max_pages=max_pages, max_depth=max_depth, login=login)
+    pages, blocked = await crawl(entry_url, allowed_origins, max_pages=max_pages, max_depth=max_depth, login=login,
+                                 progress=progress)
     if not pages:
         raise ValueError("시작 화면을 열지 못했습니다.")
+    _emit(progress, "crawl_finished", f"화면 {len(pages)}개를 둘러봤어요 · 쓰기 요청 {blocked['writes']}건, 다른 사이트 요청 "
+          f"{blocked['other_origins']}건을 막았어요", pages=len(pages), writes_blocked=blocked["writes"],
+          other_origins_blocked=blocked["other_origins"])
+    _emit(progress, "proposing", "둘러본 화면으로 기능과 과업 후보를 정리하는 중이에요")
     proposal = await asyncio.to_thread(propose, pages, entry_url, client, bool(login))
+    _emit(progress, "proposed", f"기능 {len(proposal.features)}개, 과업 후보 {len(proposal.tasks)}개를 찾았어요",
+          features=len(proposal.features), tasks=len(proposal.tasks))
     crawled = {p["path"] for p in pages}
     screen_names = {}
     for s in proposal.screens:                     # 역할 이름은 표시용이라 이상한 항목만 버리고 탐색은 실패시키지 않는다
