@@ -1,15 +1,35 @@
+"""사이트 확인(P02·P03). 둘러보기는 에이전트(agent/explore.py·agent/preflight.py)가 하고, 여기서는 검사·진행 기록·결과 저장을 맡는다.
+
+두 가지로 시작할 수 있다.
+- create_discovery: 요청 안에서 끝까지 기다렸다가 결과를 돌려준다 (기존 동작, 201).
+- start_discovery: running 상태로 만들어 바로 돌려주고(202) 백그라운드 스레드에서 둘러본다. 화면은 GET 으로 진행 피드를 읽는다.
+
+둘러보는 쪽은 이벤트 루프 안이라 ORM 을 쓸 수 없다. 그래서 진행 사건은 ProgressLog 에 모으고,
+둘러보기를 감싼 바깥 스레드가 FLUSH_SECONDS 마다 DB 에 쓴다.
+"""
 import asyncio
+import logging
+import threading
 import time
 from datetime import timedelta
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.db import connections
 from django.utils import timezone
 
 from common.exceptions import ApiError
 from common.projects import project_target
 
 from .models import Discovery
+
+logger = logging.getLogger(__name__)
+
+PROGRESS_LIMIT = 100          # 화면에 보여 줄 최근 사건 수
+FLUSH_SECONDS = 0.5           # 진행 사건을 DB 에 쓰는 간격
+HEARTBEAT_SECONDS = 5         # 새 사건이 없어도 이 간격으로 updated_at 을 갱신한다
+STALE_SECONDS = 120           # 이만큼 갱신이 없으면 중단된 것으로 본다 (서버 재시작 등)
+UNREACHABLE = "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요."
 
 
 def run_discovery(variant):
@@ -21,13 +41,14 @@ def run_discovery(variant):
     return asyncio.run(discover_site(variant))
 
 
-def run_exploration(entry_url, allowed_origins, login=None):
+def run_exploration(entry_url, allowed_origins, login=None, progress=None):
     """처음 보는 URL을 읽기 전용으로 둘러보고 기능·과업 후보를 받는다 (agent/explore.py). 테스트에서는 mock한다.
 
     login: {"url", "username", "password"} 이면 그 계정으로 로그인한 상태로 둘러본다.
+    progress: 진행 사건을 받는 함수. 이벤트 루프 안에서 불리므로 ORM 을 쓰면 안 된다.
     """
     from agent.explore import discover_url
-    return asyncio.run(discover_url(entry_url, list(allowed_origins), login=login))
+    return asyncio.run(discover_url(entry_url, list(allowed_origins), login=login, progress=progress))
 
 
 def _screen_names(names):
@@ -45,7 +66,42 @@ def _origin(url):
     return f"{p.scheme}://{p.netloc}"
 
 
-def create_discovery(user, project, data):
+class ProgressLog:
+    """진행 사건 모음. add 는 어느 스레드에서 불러도 되고, flush 는 ORM 을 쓸 수 있는 스레드에서만 부른다."""
+
+    def __init__(self, discovery):
+        self.discovery = discovery
+        self.lock = threading.Lock()
+        self.pending = []
+        self.seq = max((e.get("seq", 0) for e in discovery.progress), default=0)
+        self.started = time.monotonic()
+        self.saved_at = time.monotonic()
+
+    def add(self, event):
+        message = str(event.get("message") or "")[:200]
+        if not message:
+            return
+        with self.lock:
+            self.seq += 1
+            self.pending.append({**event, "message": message, "seq": self.seq,
+                                 "t": round(time.monotonic() - self.started, 1)})
+
+    def take(self):
+        with self.lock:
+            new, self.pending = self.pending, []
+        if new:
+            self.discovery.progress = (self.discovery.progress + new)[-PROGRESS_LIMIT:]
+        return bool(new)
+
+    def flush(self):
+        """새 사건이 있거나 마지막 저장 뒤 HEARTBEAT_SECONDS 가 지났으면 저장한다."""
+        if self.take() or time.monotonic() - self.saved_at >= HEARTBEAT_SECONDS:
+            self.discovery.save(update_fields=["progress", "updated_at"])
+            self.saved_at = time.monotonic()
+
+
+def _prepare(project, data):
+    """요청 검사. 둘러보기에 필요한 값을 돌려준다 (테스트 계정 값은 메모리에만 둔다)."""
     target = project_target(project)
     entry_url = data.get("entry_url") or target["entry_url"]
     p = urlsplit(entry_url)
@@ -69,33 +125,138 @@ def create_discovery(user, project, data):
         if account is None:
             raise ApiError(422, "LOGIN_URL_REQUIRED", "테스트 계정의 로그인 화면 주소를 먼저 등록해주세요.",
                            {"login_url": ["로그인 화면 주소가 없습니다."]})
+    return {"entry_url": entry_url, "allowed_origins": target["allowed_origins"], "explore": explore,
+            "account": account, "variant": data["variant"], "login_mode": data["login_mode"]}
 
-    started = time.monotonic()
-    try:
-        if explore:
-            login = {k: account[k] for k in ("url", "username", "password")} if account else None
-            result = run_exploration(entry_url, target["allowed_origins"], login=login)
-        else:
-            result = run_discovery(data["variant"])
-    except ValueError as exc:
-        if account and "로그인" in str(exc):
-            from testaccounts.services import record_check
-            record_check(account["account_id"], False, "사이트 확인 중 로그인 실패")
-            raise ApiError(409, "TEST_ACCOUNT_LOGIN_FAILED", "테스트 계정으로 로그인하지 못했습니다. 계정과 로그인 화면 주소를 확인해주세요.") from exc
-        raise ApiError(503, "SITE_UNREACHABLE", "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요.") from exc
-    except Exception as exc:
-        raise ApiError(503, "SITE_UNREACHABLE", "사이트를 살펴보지 못했습니다. 잠시 뒤 다시 확인해주세요.") from exc
-    if account:
+
+def _work(ctx, progress):
+    """실제 둘러보기. 별도 스레드에서 돈다."""
+    if ctx["explore"]:
+        account = ctx["account"]
+        login = {k: account[k] for k in ("url", "username", "password")} if account else None
+        return run_exploration(ctx["entry_url"], ctx["allowed_origins"], login=login, progress=progress)
+    progress({"kind": "demo_started", "message": "데모 쇼핑몰의 시작 화면을 확인하는 중이에요"})
+    result = run_discovery(ctx["variant"])
+    progress({"kind": "demo_finished", "message": f"기능 {len(result.get('features') or [])}개를 찾았어요"})
+    return result
+
+
+def _failure(exc, account):
+    """둘러보기 예외 → (HTTP 상태, 오류 코드, 사용자 문구). 내부 예외 문구는 내보내지 않는다."""
+    if account and isinstance(exc, ValueError) and "로그인" in str(exc):
         from testaccounts.services import record_check
-        record_check(account["account_id"], True, "사이트 확인 중 로그인 성공")
-    if not result.get("features"):
-        raise ApiError(422, "NO_FEATURES_FOUND", "시작 화면에서 확인할 수 있는 기능을 찾지 못했습니다.")
+        record_check(account["account_id"], False, "사이트 확인 중 로그인 실패")
+        return 409, "TEST_ACCOUNT_LOGIN_FAILED", "테스트 계정으로 로그인하지 못했습니다. 계정과 로그인 화면 주소를 확인해주세요."
+    return 503, "SITE_UNREACHABLE", UNREACHABLE
 
-    now = timezone.now()
+
+def _new(user, project, ctx):
     return Discovery.objects.create(
-        project=project, created_by=user, entry_url=entry_url, login_mode=data["login_mode"],
-        screen_names=_screen_names(result.get("screen_names")),
-        variant="explore" if explore else data["variant"], features=result["features"], tasks=result.get("tasks", []),
-        note=(result.get("note") or "")[:300], elapsed_seconds=round(time.monotonic() - started, 2),
-        expires_at=now + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS),
-    )
+        project=project, created_by=user, entry_url=ctx["entry_url"], login_mode=ctx["login_mode"],
+        variant="explore" if ctx["explore"] else ctx["variant"], status=Discovery.Status.RUNNING,
+        progress=[{"seq": 1, "t": 0.0, "kind": "queued", "message": "사이트 확인을 시작했어요"}],
+        expires_at=timezone.now() + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS))
+
+
+def _execute(discovery, ctx):
+    """둘러보기를 끝까지 돌리고 결과를 저장한다. 실패하면 (HTTP 상태, 코드, 문구), 성공하면 None."""
+    log = ProgressLog(discovery)
+    box = {}
+
+    def work():
+        try:
+            box["result"] = _work(ctx, log.add)
+        except BaseException as exc:          # noqa: BLE001 - 어떤 실패든 상태로 남긴다
+            box["error"] = exc
+
+    worker = threading.Thread(target=work, name=f"discovery-{discovery.pk}", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(FLUSH_SECONDS)
+        log.flush()
+
+    account, result, failure = ctx["account"], box.get("result"), None
+    if "error" in box:
+        logger.warning("사이트 확인 실패 %s: %s", discovery.pk, type(box["error"]).__name__)
+        failure = _failure(box["error"], account)
+    else:
+        if account:
+            from testaccounts.services import record_check
+            record_check(account["account_id"], True, "사이트 확인 중 로그인 성공")
+        if not result.get("features"):
+            failure = 422, "NO_FEATURES_FOUND", "시작 화면에서 확인할 수 있는 기능을 찾지 못했습니다."
+
+    discovery.elapsed_seconds = round(time.monotonic() - log.started, 2)
+    if failure:
+        _, code, message = failure
+        log.add({"kind": "failed", "message": message})
+        log.take()
+        discovery.status, discovery.error_code, discovery.error_message = Discovery.Status.FAILED, code, message
+        discovery.save()
+        return failure
+    log.add({"kind": "succeeded", "message": "사이트 확인을 마쳤어요"})
+    log.take()
+    discovery.status = Discovery.Status.SUCCEEDED
+    discovery.features, discovery.tasks = result["features"], result.get("tasks", [])
+    discovery.screen_names = _screen_names(result.get("screen_names"))
+    discovery.note = (result.get("note") or "")[:300]
+    discovery.expires_at = timezone.now() + timedelta(seconds=settings.EXITPLAIN_DISCOVERY_TTL_SECONDS)
+    discovery.save()
+    return None
+
+
+def create_discovery(user, project, data):
+    """요청 안에서 끝까지 둘러보고 결과를 돌려준다. 실패하면 ApiError (실패 기록은 남는다)."""
+    ctx = _prepare(project, data)
+    discovery = _new(user, project, ctx)
+    failure = _execute(discovery, ctx)
+    if failure:
+        raise ApiError(*failure)
+    return discovery
+
+
+def _active_count():
+    cutoff = timezone.now() - timedelta(seconds=STALE_SECONDS)
+    return Discovery.objects.filter(status=Discovery.Status.RUNNING, updated_at__gte=cutoff).count()
+
+
+def _run_in_background(discovery_id, ctx):
+    try:
+        _execute(Discovery.objects.get(pk=discovery_id), ctx)
+    except Exception:
+        logger.exception("사이트 확인 백그라운드 작업 오류 %s", discovery_id)
+        Discovery.objects.filter(pk=discovery_id, status=Discovery.Status.RUNNING).update(
+            status=Discovery.Status.FAILED, error_code="SITE_UNREACHABLE", error_message=UNREACHABLE,
+            updated_at=timezone.now())
+    finally:
+        connections.close_all()
+
+
+def start_discovery(user, project, data):
+    """running 으로 만들어 바로 돌려주고 백그라운드에서 둘러본다.
+
+    EXITPLAIN_DISCOVERY_BACKGROUND=False 면 같은 요청 안에서 끝까지 돌린다 (테스트용). 응답 모양은 같다.
+    """
+    ctx = _prepare(project, data)
+    if _active_count() >= settings.EXITPLAIN_DISCOVERY_MAX_ACTIVE:
+        raise ApiError(429, "DISCOVERY_BUSY", "지금 확인 중인 사이트가 많아요. 잠시 뒤 다시 시도해주세요.")
+    discovery = _new(user, project, ctx)
+    if settings.EXITPLAIN_DISCOVERY_BACKGROUND:
+        threading.Thread(target=_run_in_background, args=(discovery.pk, ctx), name=f"discovery-job-{discovery.pk}",
+                         daemon=True).start()
+    else:
+        _execute(discovery, ctx)
+    return discovery
+
+
+def mark_if_stale(discovery):
+    """running 인데 STALE_SECONDS 동안 갱신이 없으면(서버 재시작 등) 실패로 바꾼다."""
+    if discovery.status == Discovery.Status.RUNNING and \
+            timezone.now() - discovery.updated_at > timedelta(seconds=STALE_SECONDS):
+        message = "사이트 확인이 중간에 멈췄어요. 다시 시도해주세요."
+        discovery.status, discovery.error_code, discovery.error_message = \
+            Discovery.Status.FAILED, "DISCOVERY_INTERRUPTED", message
+        discovery.progress = (discovery.progress + [{"seq": max((e.get("seq", 0) for e in discovery.progress), default=0) + 1,
+                                                      "t": None, "kind": "failed", "message": message}])[-PROGRESS_LIMIT:]
+        discovery.save(update_fields=["status", "error_code", "error_message", "progress", "updated_at"])
+    return discovery
