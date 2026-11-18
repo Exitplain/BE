@@ -21,3 +21,41 @@ class CalibrationRevision(models.Model):
     class Meta:
         ordering = ["-revision"]
         constraints = [models.UniqueConstraint(fields=["project", "revision"], name="uniq_calibration_revision")]
+
+
+class HumanObservation(models.Model):
+    """사람 관측 1건 (K04, CAL-16~18). 실제 참여자가 과업을 해 본 결과를 진행자가 넣는다. 가짜 사람 데이터는 넣지 않는다.
+
+    같은 프로젝트·참여자·과업은 1건이다 (다시 넣으면 덮어쓴다). 이름·연락처 같은 개인정보 칸은 없다.
+    purpose: calibration(보정 근거로 쓸 수 있음) / evaluation(평가용: 조정안 계산에 쓰지 않음)
+    """
+
+    class Outcome(models.TextChoices):
+        SUCCESS = "success", "완료"
+        DROPOUT = "dropout", "이탈"
+
+    class Purpose(models.TextChoices):
+        CALIBRATION = "calibration", "보정용"
+        EVALUATION = "evaluation", "평가용"
+
+    class Source(models.TextChoices):
+        MANUAL = "manual", "직접 입력"
+        RECORDER = "recorder", "기록 장치(recorder.js) 가져오기"
+
+    project = models.ForeignKey(settings.EXITPLAIN_PROJECT_MODEL, on_delete=models.CASCADE,
+                                related_name="human_observations")
+    participant_code = models.CharField(max_length=40)
+    task_id = models.CharField(max_length=80)
+    outcome = models.CharField(max_length=8, choices=Outcome.choices)
+    stage_id = models.CharField(max_length=300, blank=True, default="")   # 멈춘 화면 경로 (이탈만)
+    cause = models.CharField(max_length=20, blank=True, default="")       # behavior.CAUSES 또는 unknown (이탈만)
+    purpose = models.CharField(max_length=12, choices=Purpose.choices, default=Purpose.CALIBRATION)
+    source = models.CharField(max_length=10, choices=Source.choices, default=Source.MANUAL)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["participant_code", "task_id"]
+        constraints = [models.UniqueConstraint(fields=["project", "participant_code", "task_id"],
+                                               name="uniq_human_observation")]
