@@ -142,3 +142,16 @@ def test_borderline_population_varies_by_seed():
         return count
     counts = [dropouts(seed) for seed in (1, 2, 3)]
     assert len(set(counts)) > 1 and all(0 < c < 20 for c in counts)     # 리포트에 범위가 생김
+
+def test_weight_scale_multiplies_cause_weights_and_defaults_to_no_change():
+    import pytest
+    base = PersonaMeter(Persona(id="a"), 3)
+    scaled = PersonaMeter(Persona(id="a", weight_scale={"cost": 1.5, "navigation": 0.5}), 3)
+    assert scaled.threshold == base.threshold                                   # 난수 순서가 바뀌지 않는다
+    assert scaled.weights["cost"] == pytest.approx(base.weights["cost"] * 1.5)
+    assert scaled.weights["revisit"] == pytest.approx(base.weights["revisit"] * 0.5)
+    assert scaled.weights["trust"] == pytest.approx(base.weights["trust"])
+    with pytest.raises(ValueError):
+        Persona(id="a", weight_scale={"mood": 1.2})
+    with pytest.raises(ValueError):
+        Persona(id="a", weight_scale={"cost": 5})

@@ -72,6 +72,7 @@ class PersonaMeter:
         self.variables = {k: getattr(persona, k) for k in VARIABLE_KEYS}   # 이번 시드에서 실제로 쓴 수치
 
         self.threshold = round(persona.frustration_threshold * factor(persona.patience) * jitter(), 3)
+        scale = persona.weight_scale      # 보정 배율 (되돌아감은 탐색 실패 배율을 같이 쓴다)
         self.required_limit = persona.max_required_fields
         wander = factor(100 - persona.digital_literacy)
         self.weights = {
@@ -84,6 +85,7 @@ class PersonaMeter:
             "technical": WEIGHTS["technical"] * factor(100 - persona.patience) * jitter(),
             "accessibility": WEIGHTS["accessibility"] * wander * jitter(),
         }
+        self.weights = {k: v * scale.get("navigation" if k == "revisit" else k, 1.0) for k, v in self.weights.items()}
         self.score = 0.0
         self.contributions = {key: 0.0 for key in CAUSES}
         self.stages = []

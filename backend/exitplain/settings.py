@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'testaccounts',
     'sources',
     'measurements',
+    'calibrations',
 ]
 
 MIDDLEWARE = [

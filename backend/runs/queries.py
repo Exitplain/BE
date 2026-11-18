@@ -46,6 +46,8 @@ def run_detail(run):
         "project_id": run.project_id,
         "phase": run_phase(run.status, started),
         "cancel_requested": run.cancel_requested_at is not None,
+        # 이 실행이 쓴 보정 리비전 (0 = 기본 모형, CAL-04)
+        "calibration_revision": (run.config or {}).get("calibration_revision", 0),
         "error": {"code": run.error_code, "message": run.error_message} if run.error_code else None,
         "progress": {
             "expected_sessions": (run.config or {}).get("expected_sessions", 0),

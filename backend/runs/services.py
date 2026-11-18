@@ -9,6 +9,7 @@ from django.db.models import Max, Q
 from django.utils import timezone
 
 from common.exceptions import ApiError
+from calibrations import services as calibration_services
 from plans.run_input import RunInputError, build_run_inputs
 from projects.models import Project
 
@@ -113,7 +114,7 @@ def _split_agent_run_id(agent_run_id, run_id):
 
 
 def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, parent_run, change_note, key,
-                scope=None):
+                scope=None, calibration_revision=0):
     with transaction.atomic():
         locked = Project.objects.select_for_update().get(pk=project.pk)  # 번호 채번과 동시 실행 제한을 직렬화한다
         limit = settings.EXITPLAIN_MAX_ACTIVE_RUNS_PER_PROJECT
@@ -125,6 +126,7 @@ def _insert_run(project, plan_snapshot, created_by, run_id, inputs, *, kind, par
             change_note=change_note, plan_snapshot=plan_snapshot, idempotency_key=key,
             config={"policy": settings.AGENT_POLICY, "model": settings.AGENT_MODEL, "task_count": len(inputs),
                     "expected_sessions": sum(len(i["personas"]) for i in inputs),
+                    "calibration_revision": calibration_revision,
                     **({"reproduce": scope} if scope else {})})
         task_runs = []
         for agent_input in inputs:
@@ -148,16 +150,18 @@ def create_run(project, plan_snapshot, created_by, *, idempotency_key=None, kind
     if key and (existing := _existing_by_key(project, key, plan_snapshot)):
         return existing, False
     run_id = uuid.uuid4()
+    calibration_revision, calibration = calibration_services.current(project)   # 실행을 만들 때 고정 (CAL-03)
     try:
         inputs = build_run_inputs(plan_snapshot, run_id=str(run_id),
-                                  scope=_input_scope(scope) if scope else None)
+                                  scope=_input_scope(scope) if scope else None, calibration=calibration)
     except RunInputError as exc:
         raise ApiError(422, "RUN_INPUT_INVALID", str(exc)) from exc
     _check_targets(inputs)
     for _ in range(SEQUENCE_RETRIES):
         try:
             return _insert_run(project, plan_snapshot, created_by, run_id, inputs, kind=kind, parent_run=parent_run,
-                               change_note=change_note, key=key, scope=scope), True
+                               change_note=change_note, key=key, scope=scope,
+                               calibration_revision=calibration_revision), True
         except IntegrityError:
             if key and (existing := _existing_by_key(project, key, plan_snapshot)):
                 return existing, False  # 같은 요청이 동시에 들어와 다른 쪽이 먼저 만들었다

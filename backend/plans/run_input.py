@@ -63,18 +63,21 @@ def required_field_limit(variables):
     return max(4, min(6, round(3 + 2 * patience / 100 + (100 - trust_need) / 100)))
 
 
-def _agent_persona(p, frustration_enabled):
+def _agent_persona(p, frustration_enabled, calibration=None):
     """스냅샷 페르소나 → agent.schemas.Persona. 수치 4개는 에이전트가 이탈 판정에 직접 쓴다 (agent/behavior.py)."""
     variables = p.get("variables") or {}
     persona = {"id": p["code"], "context": p["context"],
                **{k: int(variables[k]) for k in VARIABLE_KEYS if k in variables},
                "max_required_fields": required_field_limit(variables)}
+    if calibration:
+        from calibrations.params import apply_to_persona
+        apply_to_persona(persona, calibration, p.get("segment_id"))
     if not frustration_enabled:
         persona["frustration_threshold"] = NO_DROPOUT_THRESHOLD
     return persona
 
 
-def build_run_input(snapshot, *, run_id, task_id, seed=1, segment_ids=None):
+def build_run_input(snapshot, *, run_id, task_id, seed=1, segment_ids=None, calibration=None):
     """과업 1개·시드 1회의 RunInput dict. agent.schemas.RunInput으로 검증한 뒤 반환한다."""
     from agent.schemas import RunInput
 
@@ -101,7 +104,7 @@ def build_run_input(snapshot, *, run_id, task_id, seed=1, segment_ids=None):
         "goal": task["goal"],
         "success_path": task.get("success_path"),
         "success_criteria": task.get("success_criteria"),
-        "personas": [_agent_persona(p, frustration_enabled) for p in _personas(data, segment_ids)],
+        "personas": [_agent_persona(p, frustration_enabled, calibration) for p in _personas(data, segment_ids)],
         "max_steps": limits["max_steps"],
         "timeout_seconds": limits["timeout_seconds"],
         "concurrency": min(limits["concurrency"], 5),
@@ -129,11 +132,12 @@ def _personas(data, segment_ids):
     return chosen
 
 
-def build_run_inputs(snapshot, *, run_id, scope=None):
+def build_run_inputs(snapshot, *, run_id, scope=None, calibration=None):
     """확정된 과업 × 시드의 RunInput 목록. 순서: 과업 → 시드.
 
     scope(원인 재현): {"task_ids": [...], "segment_ids": [...], "seed_count": n} 로 일부만 돌린다.
     없으면 계획 전체 (사전 테스트·재테스트).
+    calibration: 프로젝트 보정 값 (calibrations.params). 실행을 만들 때 고정해 페르소나에 반영한다.
     """
     scope = scope or {}
     tasks = snapshot.data["tasks"]
@@ -146,5 +150,6 @@ def build_run_inputs(snapshot, *, run_id, scope=None):
     seed_count = snapshot.data["limits"]["seed_count"]
     if scope.get("seed_count"):
         seed_count = min(seed_count, scope["seed_count"])
-    return [build_run_input(snapshot, run_id=run_id, task_id=t["id"], seed=s, segment_ids=scope.get("segment_ids"))
+    return [build_run_input(snapshot, run_id=run_id, task_id=t["id"], seed=s, segment_ids=scope.get("segment_ids"),
+                            calibration=calibration)
             for t in tasks for s in range(1, seed_count + 1)]
