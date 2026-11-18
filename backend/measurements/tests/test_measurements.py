@@ -253,6 +253,10 @@ class FunnelTests(MeasureHelpers, TestCase):
         self.assertEqual(task["gaps"], ["/cart"])                       # 30% 는 예측 범위(약 39~78%) 밖
         self.assertAlmostEqual(rows["/cart"]["error"], round(30 - (low + high) / 2, 1), places=1)
         self.assertEqual(task["max_drop"]["actual"]["label"], "상품 상세→장바구니")
+        report = res.json()["report"]
+        self.assertIsNone(report["run_id"])                                   # 테스트 리포트는 실행 없이 만들었다
+        self.assertTrue(report["plan_revision_id"])
+        self.assertEqual(sum(seg["count"] for seg in report["segments"]), 10)
         self.assertIsNotNone(task["mean_error"])
         self.assertEqual((rows["/"]["error"], rows["/"]["compared"], task["compared_stages"]), (None, False, 3))
 

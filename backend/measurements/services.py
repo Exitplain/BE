@@ -343,6 +343,16 @@ def _task_compare(task, by_stage):
     }
 
 
+def _segments(report):
+    counts, names = {}, {}
+    for persona in (report.plan_snapshot.data or {}).get("personas") or []:
+        sid = persona.get("segment_id")
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+            names.setdefault(sid, persona.get("segment_name") or sid)
+    return [{"id": sid, "name": names[sid], "count": n} for sid, n in counts.items()]
+
+
 def funnel_dict(project, site, days, device):
     report = latest_report(project)
     stage_ids = {s["id"] for s in prediction_stages(report)}
@@ -358,7 +368,11 @@ def funnel_dict(project, site, days, device):
         "min_sample": MIN_SAMPLE,
         "report": None if report is None else {
             "report_id": str(report.id), "created_at": report.created_at.isoformat(),
-            "run_sequence": report.run.sequence_no if report.run_id else None},
+            "run_sequence": report.run.sequence_no if report.run_id else None,
+            # 원인 재현(R09)이 쓰는 값: 비교한 실행·확정 계획·세그먼트
+            "run_id": str(report.run_id) if report.run_id else None,
+            "plan_revision_id": str(report.plan_snapshot_id),
+            "segments": _segments(report)},
         "mapping_saved": bool(site.mapping_saved_at),
         "tasks": [_task_compare(t, by_stage) for t in (report.data.get("tasks") or [])] if report else [],
     }
