@@ -80,24 +80,29 @@ class CalibrationApiTests(WizardMixin, TestCase):
         stale = self.client.post(f"{self.url}/calibrations", {"expected_revision": 0, "keys": ["*.weight.cost"]},
                                  format="json")
         self.assertEqual((stale.status_code, stale.json()["error"]["code"]), (409, "REVISION_CONFLICT"))
-        second = self.client.post(f"{self.url}/calibrations", {"expected_revision": 1, "keys": ["*.weight.cost"]},
-                                  format="json")
-        self.assertEqual(second.json()["params"]["segments"]["*"], {"weight_scale": {"cost": 1.2}})
-        self.assertEqual(second.json()["params"]["segments"]["segment_1"], {"threshold_scale": 0.8})   # 앞 값 유지
+
+        # 보정 뒤 새 사전 테스트 전에는 같은 차이로 또 조정하지 않는다 (이중 적용 방지)
+        waiting = self.proposal()
+        self.assertEqual((waiting["available"], waiting["reason"], waiting["items"]), (False, "WAITING_NEXT_RUN", []))
+        again = self.client.post(f"{self.url}/calibrations", {"expected_revision": 1, "keys": ["*.weight.cost"]},
+                                 format="json")
+        self.assertEqual((again.status_code, again.json()["error"]["code"]), (422, "PROPOSAL_CHANGED"))
 
         history = self.client.get(f"{self.url}/calibrations").json()["items"]
-        self.assertEqual([h["revision"] for h in history], [2, 1])
-        self.assertIn("빠른 구매형 인내심 임계치 1.00→0.80", history[1]["changes_summary"])
+        self.assertEqual([h["revision"] for h in history], [1])
+        self.assertIn("빠른 구매형 인내심 임계치 1.00→0.80", history[0]["changes_summary"])
         self.assertEqual(history[0]["base_comparison"], "사전 테스트 vs 실측 최근 7일")
         self.assertIsNone(history[0]["error_after_pp"])
 
         first = CalibrationRevision.objects.get(project=self.project, revision=1)
-        back = self.client.post(f"/api/v1/calibrations/{first.pk}/restore", {"expected_revision": 2}, format="json")
-        self.assertEqual((back.status_code, back.json()["revision"], back.json()["restored_from"]), (201, 3, 1))
+        back = self.client.post(f"/api/v1/calibrations/{first.pk}/restore", {"expected_revision": 1}, format="json")
+        self.assertEqual((back.status_code, back.json()["revision"], back.json()["restored_from"]), (201, 2, 1))
         self.assertEqual(self.client.get(f"{self.url}/calibration").json()["params"], first.params)
-        reset = self.client.post(f"{self.url}/calibrations/reset", {"expected_revision": 3}, format="json")
-        self.assertEqual((reset.json()["revision"], reset.json()["params"]), (4, {"segments": {}}))
-        self.assertEqual(CalibrationRevision.objects.filter(project=self.project).count(), 4)   # 지우지 않는다
+        reset = self.client.post(f"{self.url}/calibrations/reset", {"expected_revision": 2}, format="json")
+        self.assertEqual((reset.json()["revision"], reset.json()["params"]), (3, {"segments": {}}))
+        self.assertEqual(CalibrationRevision.objects.filter(project=self.project).count(), 3)   # 지우지 않는다
+        # 기본 모형으로 되돌리면 기준 실행(기본 모형)과 같아져 조정안이 다시 열린다
+        self.assertTrue(self.proposal()["available"])
 
     def test_apply_rejects_unknown_or_changed_keys(self, _):
         self.prepare()

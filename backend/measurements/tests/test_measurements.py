@@ -284,3 +284,30 @@ class FunnelTests(MeasureHelpers, TestCase):
     def test_device_comes_from_width_only(self, _):
         self.assertEqual((services.device_of(390), services.device_of(1280), services.device_of("x"),
                           services.device_of(True)), ("mobile", "desktop", "", ""))
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class FunnelEntryAndBaseTests(MeasureHelpers, TestCase):
+    REPORT = FUNNEL_DATA
+
+    def visit(self, key, path, sids):
+        for sid in sids:
+            self.send(key, path, sid=f"visitor{sid:04d}", w=390)
+
+    def test_sessions_that_skip_the_first_stage_are_counted_apart(self, _):
+        self.report()
+        key = self.issue()
+        self.visit(key, "/", range(10))
+        self.visit(key, "/product/7", list(range(8)) + list(range(100, 105)))   # 5명은 상세로 바로 들어옴
+        rows = {r["id"]: r for r in self.client.get(self.url + "/funnel").json()["tasks"][0]["stages"]}
+        self.assertEqual(rows["/products/:id"]["actual"], {"sessions": 8, "rate": 80.0, "mid_entry": 5})
+
+    def test_cause_repro_report_is_not_the_comparison_base(self, _):
+        from runs.models import Run
+        self.report()
+        base = ReportSnapshot.objects.get()
+        repro = Run.objects.create(project=self.project, created_by=self.user, sequence_no=2, kind="cause_repro",
+                                   plan_snapshot=base.plan_snapshot, status=Run.Status.COMPLETED)
+        ReportSnapshot.objects.create(plan_snapshot=base.plan_snapshot, run=repro, run_ref=str(repro.id), revision=1,
+                                      status="final", source="database", data={"tasks": []})
+        self.assertEqual(services.latest_report(self.project), base)

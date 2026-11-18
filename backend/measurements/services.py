@@ -174,8 +174,12 @@ MAPPING_DAYS = 7
 
 
 def latest_report(project):
-    """이 프로젝트의 가장 최근 예측 리포트 (실행 퍼널 단계의 기준)."""
+    """이 프로젝트의 가장 최근 예측 리포트 (실행 퍼널 단계의 기준).
+
+    원인 재현(cause_repro) 리포트는 과업 1개 × 일부 세그먼트만 돌린 것이라 기준에서 뺀다.
+    """
     return (ReportSnapshot.objects.filter(plan_snapshot__plan__project=project)
+            .exclude(run__kind="cause_repro")
             .order_by("-created_at", "-revision").first())
 
 
@@ -304,11 +308,16 @@ def _task_compare(task, by_stage):
     funnel = task.get("journey_funnel") or {}
     valid = funnel.get("valid_sessions") or 0
     stages = funnel.get("stages") or []
-    base = len(by_stage.get(stages[0]["path"], ())) if stages else 0
+    # 퍼널은 첫 단계를 거친 세션만 센다. 검색·광고로 중간 화면에 바로 들어온 세션은 mid_entry 로 따로 둔다
+    # (섞으면 도달률이 100%를 넘고 오차·차이 구간이 틀어진다)
+    entered = by_stage.get(stages[0]["path"], set()) if stages else set()
+    base = len(entered)
     rows = []
     for index, stage in enumerate(stages):
         band = wilson(stage.get("reached") or 0, valid)
-        sessions = len(by_stage[stage["path"]]) if stage["path"] in by_stage else None
+        visitors = by_stage.get(stage["path"])
+        sessions = len(visitors & entered) if visitors is not None else None
+        mid_entry = len(visitors - entered) if visitors is not None else 0
         actual = sessions / base * 100 if sessions is not None and base else None
         low, high = (band if band else (None, None))
         mid = (low + high) / 2 if band else None
@@ -319,7 +328,8 @@ def _task_compare(task, by_stage):
             "id": stage["path"], "name": stage.get("name") or stage["path"], "is_goal": bool(stage.get("is_goal")),
             "predicted": {"low": _pct(low), "high": _pct(high), "mid": _pct(mid),
                           "reached": stage.get("reached") or 0, "valid": valid},
-            "actual": None if sessions is None else {"sessions": sessions, "rate": _pct(actual)},
+            "actual": None if sessions is None else {"sessions": sessions, "rate": _pct(actual),
+                                                     "mid_entry": mid_entry},
             "error": _pct(error),
             "gap": compared and not (low <= actual <= high),
             "compared": compared,
