@@ -243,7 +243,7 @@ class FunnelTests(MeasureHelpers, TestCase):
         res = self.client.get(self.url + "/funnel?days=7")
         self.assertEqual(res.status_code, 200, res.content)
         task = res.json()["tasks"][0]
-        self.assertEqual((task["base_sessions"], task["collecting"], task["mapped_stages"]), (10, True, 4))
+        self.assertEqual((task["base_sessions"], task["collecting"], task["mapped_stages"]), (10, False, 4))
         rows = {r["id"]: r for r in task["stages"]}
         self.assertEqual([rows[k]["actual"]["rate"] for k in ("/", "/products/:id", "/cart", "/order/success")],
                          [100.0, 80.0, 30.0, 20.0])

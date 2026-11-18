@@ -117,12 +117,34 @@ class CalibrationApiTests(WizardMixin, TestCase):
         self.assertEqual(self.client.post(f"{self.url}/calibrations", {"keys": ["x"]}, format="json").status_code, 422)
 
     def test_reasons_when_no_proposal_is_possible(self, _):
+        self.assertEqual(self.proposal()["reason"], "NO_PREDICTION")
+        snapshot = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        ReportSnapshot.objects.create(plan_snapshot=snapshot, run_ref="r1", revision=1, status="final",
+                                      source="database", data=REPORT)
         self.assertEqual(self.proposal()["reason"], "NOT_CONNECTED")
-        site = self.prepare(map_=False, report=False)
+        self.prepare(map_=False, report=False)
         self.assertEqual(self.proposal()["reason"], "NOT_MAPPED")
-        site.delete()
-        self.prepare(base=40, cart_sessions=12)
-        self.assertEqual(self.proposal()["reason"], "INSUFFICIENT_SAMPLE")
+
+    def test_small_sample_shows_provisional_values_but_blocks_apply(self, _):
+        self.prepare(base=6, cart_sessions=2)                  # 첫 단계 6세션 < 10
+        body = self.proposal()
+        self.assertEqual((body["available"], body["provisional"], body["basis"]["evidence"], body["basis"]["count"]),
+                         (True, True, "measurement", 6))
+        self.assertIn("임시값", body["message"])
+        self.assertTrue(body["items"])
+        res = self.client.post(f"{self.url}/calibrations",
+                               {"expected_revision": 0, "keys": [body["items"][0]["key"]]}, format="json")
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (422, "PROVISIONAL"))
+
+    def test_gentle_strength_halves_the_change(self, _):
+        self.prepare()
+        res = self.client.get(f"{self.url}/calibration/proposal?strength=gentle")
+        items = {i["key"]: i["proposed"] for i in res.json()["items"]}
+        self.assertEqual(items, {"segment_1.threshold": 0.9, "*.weight.cost": 1.1})
+        applied = self.client.post(f"{self.url}/calibrations", {"expected_revision": 0, "strength": "gentle",
+                                                                "keys": ["segment_1.threshold"]}, format="json")
+        self.assertEqual(applied.json()["params"], {"segments": {"segment_1": {"threshold_scale": 0.9}}})
+        self.assertEqual(self.client.get(f"{self.url}/calibration/proposal?strength=x").status_code, 422)
 
     def test_no_gap_means_nothing_to_change(self, _):
         self.prepare(cart_sessions=120)                         # 60% — 예측 범위 안
@@ -331,3 +353,46 @@ class ParticipantLinkTests(WizardMixin, TestCase):
         self.assertEqual(closed["state"], "disabled")
         self.assertEqual(self.public.get(f"/api/v1/participant-links/{link['token']}").status_code, 410)
         self.assertEqual(self.public.get("/api/v1/participant-links/nope").status_code, 404)
+
+@patch("calibrations.observations._screens_by_task", return_value=SCREENS)
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class HumanProposalTests(WizardMixin, TestCase):
+    """CAL-19: 실측이 없어도 보정용 사람 관측(가장 불편했던 화면)으로 조정안을 만든다. 10명 미만은 임시값."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = f"/api/v1/projects/{self.project.id}"
+
+    def observe(self, n, screen, cause, purpose="calibration", start=0):
+        from calibrations.models import HumanObservation
+        for i in range(start, start + n):
+            HumanObservation.objects.create(project=self.project, created_by=self.user, participant_code=f"R-{i:03d}",
+                                            task_id="order", outcome="success", pain_stage_id=screen,
+                                            pain_cause=cause, purpose=purpose)
+
+    def test_people_pick_a_screen_the_model_missed(self, *_):
+        ObservationTests.report(self)
+        self.observe(4, "/", "value")                          # 첫 화면: 모델 마찰 없음
+        self.observe(1, "/cart", "cost", start=4)
+        body = self.client.get(f"{self.url}/calibration/proposal").json()
+        self.assertEqual((body["provisional"], body["basis"]["evidence"], body["basis"]["count"]),
+                         (True, "observations", 5))
+        items = {i["key"]: i for i in body["items"]}
+        self.assertEqual(items["*.weight.value"]["proposed"], 1.1)          # 사람 근거는 작게 (k=0.1)
+        self.assertIn("5명 중 4명", items["*.weight.value"]["reason"])
+        # 모델 마찰 상위 화면 /order/success 는 아무도 고르지 않았다 → 그 화면 원인(trust)을 낮춘다
+        self.assertEqual(items["*.weight.trust"]["proposed"], 0.9)
+        self.assertNotIn("*.weight.cost", items)                           # /cart 는 1명(20%)이 골라 그대로
+        self.observe(5, "/", "value", start=5)
+        self.observe(5, "/", "value", purpose="evaluation", start=10)      # 평가용은 쓰지 않는다
+        real = self.client.get(f"{self.url}/calibration/proposal").json()
+        self.assertEqual((real["provisional"], real["basis"]["count"]), (False, 10))
+        keys = [i["key"] for i in real["items"]]
+        res = self.client.post(f"{self.url}/calibrations", {"expected_revision": 0, "keys": keys}, format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+
+    def test_no_evidence_at_all(self, *_):
+        ObservationTests.report(self)
+        body = self.client.get(f"{self.url}/calibration/proposal").json()
+        self.assertEqual((body["available"], body["reason"]), (False, "NOT_CONNECTED"))
+        self.assertIn("참여자 응답 링크", body["message"])

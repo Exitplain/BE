@@ -1,4 +1,7 @@
-"""K01 조정안 (CAL-05~09, docs/실측_보정_요구사항.md 2.2). 규칙으로만 만든다 (모델 호출 없음, 같은 입력 → 같은 결과).
+"""K01 조정안 (CAL-05~09·19, docs/실측_보정_요구사항.md 2.2·2.4.1). 규칙으로만 만든다 (모델 호출 없음, 같은 입력 → 같은 결과).
+
+근거는 실측(차이 구간) 또는 보정용 사람 관측(가장 불편했던 화면). 10 미만이면 임시값으로만 보여 준다.
+strength=gentle 이면 조정 폭을 절반으로 줄인다 ("보정 약하게").
 
 기준은 R08 비교 한 건: 가장 최근 예측 리포트 + 저장한 매핑 + 기간(기본 7일) + 디바이스 전체.
 차이 구간마다
@@ -75,90 +78,171 @@ def _bounds(kind):
     return cal.THRESHOLD_RANGE if kind == "threshold" else cal.WEIGHT_RANGE
 
 
-def build(project, days=7):
-    """{available, reason?, message?, base_revision, basis, items}"""
-    revision, params = current(project)
-    out = {"project_id": project.pk, "base_revision": revision, "days": days, "basis": None, "items": [],
-           "after_error": None, "after_note": "보정 후 오차는 다음 사전 테스트가 끝난 뒤 실제 결과로 보여 줘요."}
-    site = measure.site_for(project)
-    if site is None:
-        return {**out, "available": False, "reason": "NOT_CONNECTED", "message": "실측 데이터를 먼저 연결해 주세요."}
-    if not site.mapping_saved_at:
-        return {**out, "available": False, "reason": "NOT_MAPPED", "message": "단계 매핑을 먼저 저장해 주세요."}
-    report = measure.latest_report(project)
-    if report is None:
-        return {**out, "available": False, "reason": "NO_PREDICTION",
-                "message": "먼저 사전 테스트를 한 번 실행해야 비교할 수 있어요."}
-    used = report.run.config.get("calibration_revision", 0) if report.run_id else 0
-    if _params_of(project, used) != _normalized(params):
-        return {**out, "available": False, "reason": "WAITING_NEXT_RUN", "base_revision": revision,
-                "message": "보정을 적용한 뒤 아직 새 사전 테스트가 없어요. 다음 사전 테스트가 끝나면 다시 비교해요."}
-    funnel = measure.funnel_dict(project, site, days, "all")
-    comparable = [t for t in funnel["tasks"] if not t["collecting"] and t["compared_stages"]]
-    errors = [t["mean_error"] for t in comparable if t["mean_error"] is not None]
-    gaps = [(t, s) for t in comparable for s in t["stages"] if s["gap"]]
-    out["basis"] = {
-        "report_id": str(report.id), "run_sequence": report.run.sequence_no if report.run_id else None,
-        "days": days, "device": "all",
-        "mean_error": round(sum(errors) / len(errors), 1) if errors else None,
-        "gaps": [{"task_id": t["task_id"], "task_name": t["name"], "stage_id": s["id"], "stage_name": s["name"],
-                  "error": s["error"], "actual": s["actual"]["rate"], "low": s["predicted"]["low"],
-                  "high": s["predicted"]["high"]} for t, s in gaps],
-    }
-    if not comparable:
-        return {**out, "available": False, "reason": "INSUFFICIENT_SAMPLE",
-                "message": f"실측 세션이 단계마다 {measure.MIN_SAMPLE}개는 모여야 조정안을 만들 수 있어요."}
-    if not gaps:
-        return {**out, "available": True, "reason": "NO_GAP", "message": "모든 단계가 예측 범위 안이라 바꿀 값이 없어요."}
+MIN_EVIDENCE = 10          # 실측 첫 단계 세션 또는 보정용 사람 관측이 이만큼 모여야 실제 조정안 (그 전에는 임시값)
+HUMAN_K = 0.10             # 사람 관측 근거는 실측보다 작게 조정한다
+HUMAN_PICK_SHARE = 0.30    # 이 비율 이상이 고른 화면은 "사람에게 불편한 화면"
+HUMAN_QUIET_SHARE = 0.10   # 모델 마찰 상위 화면인데 이 비율 미만만 골랐으면 "모델이 과하게 본 화면"
+STRENGTHS = {"normal": 1.0, "gentle": 0.5}
 
-    from reports.screens import report_screens
-    screens = report_screens(report)
-    factors, reasons = {}, {}
 
-    def bump(segment_id, segment_name, kind, cause, factor, reason):
+class _Collector:
+    def __init__(self, strength):
+        self.strength = strength
+        self.factors, self.reasons = {}, {}
+
+    def bump(self, segment_id, segment_name, kind, cause, k, up, reason):
+        k = k * self.strength
         key = (segment_id, kind, cause)
-        factors[key] = factors.get(key, 1.0) * factor
-        reasons.setdefault(key, (segment_name, []))[1].append(reason)
+        self.factors[key] = self.factors.get(key, 1.0) * ((1 + k) if up else (1 - k))
+        self.reasons.setdefault(key, (segment_name, []))[1].append(reason)
 
+    def items(self, params):
+        out = []
+        for (segment_id, kind, cause), factor in sorted(self.factors.items(), key=lambda kv: (kv[0][0] != "*", kv[0])):
+            now = _raw(params, segment_id, kind, cause)
+            low, high = _bounds(kind)
+            proposed = cal.snap(min(high, max(low, now * factor)))
+            if proposed == cal.snap(now):
+                continue
+            name, why = self.reasons[(segment_id, kind, cause)]
+            out.append({
+                "key": f"{segment_id}.{kind}" + (f".{cause}" if cause else ""),
+                "segment_id": segment_id, "segment_name": name, "kind": kind, "cause": cause,
+                "label": LABEL_THRESHOLD if kind == "threshold" else f"마찰 가중치 · {CAUSES[cause]}",
+                "current": cal.snap(now), "proposed": proposed, "reason": " · ".join(dict.fromkeys(why)),
+            })
+        return out
+
+
+def _from_measurement(report, funnel, collector):
+    """실측 차이 구간 → 조정 (CAL-06). 표본이 적은 과업도 넣되, 호출한 쪽이 임시값으로 표시한다."""
+    from reports.screens import report_screens
+    tasks = [t for t in funnel["tasks"] if t["base_sessions"] and t["compared_stages"]]
+    gaps = [(t, st) for t in tasks for st in t["stages"] if st["gap"]]
+    screens = report_screens(report) if gaps else {}
     for task, stage in gaps:
         k = _k(stage["error"])
         more = stage["actual"]["rate"] < stage["predicted"]["low"]
         heat = _heat(report, task["task_id"], stage["id"])
         where = f"{task['name']} · {stage['name']}"
         if heat:
-            pick = (min if more else max)(heat.items(), key=lambda item: (item[1][1], item[0]))
-            segment_id, (segment_name, _) = pick
-            if more:
-                bump(segment_id, segment_name, "threshold", None, 1 - k,
-                     f"{where}: 실측 이탈이 예측보다 커요 ({stage['error']:+.1f}%p)")
-            else:
-                bump(segment_id, segment_name, "threshold", None, 1 + k,
-                     f"{where}: 실측 이탈이 예측보다 작아요 ({stage['error']:+.1f}%p)")
+            segment_id, (segment_name, _) = (min if more else max)(heat.items(), key=lambda item: (item[1][1], item[0]))
+            collector.bump(segment_id, segment_name, "threshold", None, k, not more,
+                           f"{where}: 실측 이탈이 예측보다 {'커요' if more else '작아요'} ({stage['error']:+.1f}%p)")
         cause = _top_cause(report, screens, task["task_id"], stage["id"])
         if cause:
-            bump("*", "전체", "weight", cause, 1 + k if more else 1 - k,
-                 f"{where} 화면에서 가장 많이 겪은 마찰이 {CAUSES[cause]}이에요")
+            collector.bump("*", "전체", "weight", cause, k, more,
+                           f"{where} 화면에서 가장 많이 겪은 마찰이 {CAUSES[cause]}이에요")
+    errors = [t["mean_error"] for t in tasks if t["mean_error"] is not None]
+    return {
+        "evidence": "measurement", "count": max((t["base_sessions"] for t in tasks), default=0),
+        "mean_error": round(sum(errors) / len(errors), 1) if errors else None,
+        "gaps": [{"task_id": t["task_id"], "task_name": t["name"], "stage_id": st["id"], "stage_name": st["name"],
+                  "error": st["error"], "actual": st["actual"]["rate"], "low": st["predicted"]["low"],
+                  "high": st["predicted"]["high"]} for t, st in gaps],
+    }
 
-    items = []
-    for (segment_id, kind, cause), factor in sorted(factors.items(), key=lambda kv: (kv[0][0] != "*", kv[0])):
-        now = _raw(params, segment_id, kind, cause)
-        low, high = _bounds(kind)
-        proposed = cal.snap(min(high, max(low, now * factor)))
-        if proposed == cal.snap(now):
+
+def _from_observations(project, collector):
+    """보정용 사람 관측(가장 불편했던 화면·이유) → 조정 (CAL-19). 평가용 관측은 쓰지 않는다 (CAL-18)."""
+    from . import observations as obs
+    from .models import HumanObservation
+    predicted, _ = obs.predictions(project)
+    rows = list(HumanObservation.objects.filter(project=project, purpose=HumanObservation.Purpose.CALIBRATION))
+    picks, counts = [], {}
+    for task_id, task in predicted.items():
+        mine = [r for r in rows if r.task_id == task_id]
+        if not mine:
             continue
-        name, why = reasons[(segment_id, kind, cause)]
-        items.append({
-            "key": f"{segment_id}.{kind}" + (f".{cause}" if cause else ""),
-            "segment_id": segment_id, "segment_name": name, "kind": kind, "cause": cause,
-            "label": LABEL_THRESHOLD if kind == "threshold" else f"마찰 가중치 · {CAUSES[cause]}",
-            "current": cal.snap(now), "proposed": proposed, "reason": " · ".join(dict.fromkeys(why)),
-        })
+        counts[task_id] = len(mine)
+        names = {st["id"]: st["name"] for st in task["stages"]}
+        chosen = {}
+        for r in mine:
+            if r.pain_stage_id:
+                chosen.setdefault(r.pain_stage_id, []).append(r.pain_cause)
+        for screen, reasons in sorted(chosen.items()):
+            share = len(reasons) / len(mine)
+            if share < HUMAN_PICK_SHARE or screen in task["pain_top"]:
+                continue
+            known = [c for c in reasons if c and c != "unknown"]
+            if not known:
+                continue
+            cause = max(sorted(set(known)), key=known.count)
+            where = f"{task['name']} · {names.get(screen, screen)}"
+            collector.bump("*", "전체", "weight", cause, HUMAN_K, True,
+                           f"{where}: 참여자 {len(mine)}명 중 {len(reasons)}명이 가장 불편했다고 골랐는데 모델 마찰은 낮아요"
+                           f" (이유: {CAUSES[cause]})")
+            picks.append({"task_id": task_id, "task_name": task["name"], "stage_id": screen,
+                          "stage_name": names.get(screen, screen), "share": round(share * 100, 1)})
+        for screen in task["pain_top"]:
+            share = len(chosen.get(screen, [])) / len(mine)
+            model_causes = task["screen_causes"].get(screen) or []
+            if share < HUMAN_QUIET_SHARE and model_causes:
+                cause = model_causes[0]
+                where = f"{task['name']} · {names.get(screen, screen)}"
+                collector.bump("*", "전체", "weight", cause, HUMAN_K, False,
+                               f"{where}: 모델은 마찰이 크다고 봤는데 참여자 {len(mine)}명 중 거의 고르지 않았어요")
+    return {"evidence": "observations", "count": max(counts.values(), default=0), "mean_error": None,
+            "gaps": [], "picks": picks}
+
+
+def build(project, days=7, strength="normal"):
+    """{available, provisional, reason?, message?, base_revision, basis, items}
+
+    근거 우선순위: 실측(10세션 이상) > 사람 관측(보정용 10명 이상) > 실측 임시값 > 사람 관측 임시값.
+    10 미만이면 provisional=True 로 조정안을 보여 주되 적용은 막는다.
+    """
+    revision, params = current(project)
+    collector = _Collector(STRENGTHS.get(strength, 1.0))
+    out = {"project_id": project.pk, "base_revision": revision, "days": days, "strength": strength,
+           "min_evidence": MIN_EVIDENCE, "provisional": False, "basis": None, "items": [],
+           "after_error": None, "after_note": "보정 후 오차는 다음 사전 테스트가 끝난 뒤 실제 결과로 보여 줘요."}
+    report = measure.latest_report(project)
+    if report is None:
+        return {**out, "available": False, "reason": "NO_PREDICTION",
+                "message": "먼저 사전 테스트를 한 번 실행해야 비교할 수 있어요."}
+    used = report.run.config.get("calibration_revision", 0) if report.run_id else 0
+    if _params_of(project, used) != _normalized(params):
+        return {**out, "available": False, "reason": "WAITING_NEXT_RUN",
+                "message": "보정을 적용한 뒤 아직 새 사전 테스트가 없어요. 다음 사전 테스트가 끝나면 다시 비교해요."}
+
+    site = measure.site_for(project)
+    measured = None
+    if site is not None and site.mapping_saved_at:
+        funnel = measure.funnel_dict(project, site, days, "all")
+        if any(t["base_sessions"] for t in funnel["tasks"]):
+            measured = (funnel, _Collector(collector.strength))
+    observed = _Collector(collector.strength)
+    human = _from_observations(project, observed)
+
+    candidates = []
+    if measured:
+        measured_basis = _from_measurement(report, measured[0], measured[1])
+        candidates.append((measured_basis["count"] >= MIN_EVIDENCE, 0, measured_basis, measured[1]))
+    if human["count"]:
+        candidates.append((human["count"] >= MIN_EVIDENCE, 1, human, observed))
+    if not candidates:
+        reason = "NOT_CONNECTED" if site is None else "NOT_MAPPED" if not site.mapping_saved_at else "NO_EVIDENCE"
+        return {**out, "available": False, "reason": reason,
+                "message": "실측을 연결하거나, 참여자 응답 링크로 사람 관측을 모아 주세요. "
+                           f"{MIN_EVIDENCE}명(세션)부터 실제 조정안을 만들어요."}
+    enough, _, basis, chosen = sorted(candidates, key=lambda c: (not c[0], c[1]))[0]
+    items = chosen.items(params)
+    out.update(provisional=not enough, items=items, basis={
+        "report_id": str(report.id), "run_sequence": report.run.sequence_no if report.run_id else None,
+        "days": days, "device": "all", **basis})
+    if not enough:
+        out["message"] = (f"지금은 {basis['count']}{'세션' if basis['evidence'] == 'measurement' else '명'}이라 임시값이에요. "
+                          f"{MIN_EVIDENCE}{'세션' if basis['evidence'] == 'measurement' else '명'}부터 실제 값으로 바뀌고 적용할 수 있어요.")
+    if not items:
+        return {**out, "available": True, "reason": "NO_GAP",
+                "message": out.get("message") or "모든 단계가 예측과 맞아 바꿀 값이 없어요."}
     unchanged = []
     for persona in report.plan_snapshot.data.get("personas") or []:
         sid = persona.get("segment_id")
         if sid and sid not in {i["segment_id"] for i in items} and sid not in {u["segment_id"] for u in unchanged}:
             unchanged.append({"segment_id": sid, "segment_name": persona.get("segment_name") or sid})
-    return {**out, "available": True, "items": items, "unchanged_segments": unchanged}
+    return {**out, "available": True, "unchanged_segments": unchanged}
 
 
 def apply_items(params, items):
