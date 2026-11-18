@@ -6,6 +6,7 @@ from common.exceptions import ApiError
 from common.projects import ensure_owner, get_owned_project
 from common.views import BaseAPIView
 
+from . import compare as cmp
 from . import params as cal
 from . import proposal
 from .models import CalibrationRevision
@@ -88,7 +89,8 @@ class CalibrationListView(BaseAPIView):
         project = get_owned_project(request.user, project_id)
         revisions = CalibrationRevision.objects.filter(project=project).select_related("created_by")[:50]
         items = [{**_revision_dict(r), "changes_summary": _summary(r), "base_comparison": _comparison(r.basis),
-                  "error_before_pp": (r.basis or {}).get("mean_error"), "error_after_pp": None}
+                  "error_before_pp": (r.basis or {}).get("mean_error"),
+                  "error_after_pp": cmp.after_error(project, r)}
                  for r in revisions]
         return Response({"project_id": project.pk, "items": items, "next_cursor": None})
 
@@ -140,3 +142,118 @@ class ResetView(BaseAPIView):
         _expected(request, revision)
         rev = _create(project, request.user, revision, params={"segments": {}}, restored_from=0)
         return Response(_revision_dict(rev), status=status.HTTP_201_CREATED)
+
+
+class CompareView(BaseAPIView):
+    """GET /api/v1/projects/{id}/calibration/compare?revision=n — K03 보정 전·후 단계별 오차 (CAL-15)
+
+    revision 을 빼면 현재 보정. 보정 후 실행이 없으면 status=waiting.
+    """
+
+    def get(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        raw = request.query_params.get("revision")
+        if raw is None:
+            revision, _ = current(project)
+        else:
+            try:
+                revision = int(raw)
+            except ValueError:
+                raise ApiError(422, "VALIDATION_ERROR", "revision 은 숫자입니다.", {"revision": ["숫자"]})
+        rev = cmp.revision_or_404(project, revision)
+        if rev is None:
+            raise ApiError(404, "NOT_FOUND", "보정 기록을 찾을 수 없습니다.")
+        return Response(cmp.compare(project, rev))
+
+
+# ---------- K04 사람 관측 (CAL-16~18) ----------
+
+def _observation_dict(row, predicted, names):
+    from . import observations as obs
+    stage_names = {s["id"]: s["name"] for s in (predicted or {}).get("stages", [])}
+    return {"id": row.pk, "participant_code": row.participant_code, "task_id": row.task_id,
+            "task_name": (predicted or {}).get("name", row.task_id), "outcome": row.outcome,
+            "stage_id": row.stage_id or None, "stage_name": stage_names.get(row.stage_id) if row.stage_id else None,
+            "cause": row.cause or None, "cause_name": names.get(row.cause) if row.cause else None,
+            "purpose": row.purpose, "source": row.source, "updated_at": row.updated_at.isoformat(),
+            "match": obs.match(row, predicted)}
+
+
+def _observations_payload(project):
+    from agent.behavior import CAUSES
+
+    from . import observations as obs
+    from .models import HumanObservation
+    predicted, report = obs.predictions(project)
+    names = {**CAUSES, "unknown": "원인 미상"}
+    rows = [_observation_dict(r, predicted.get(r.task_id), names)
+            for r in HumanObservation.objects.filter(project=project)]
+    return {"project_id": project.pk, "report_id": str(report.id) if report else None,
+            "tasks": [{"task_id": k, "name": v["name"], "stages": v["stages"],
+                       "predicted": {"outcome": v["outcome"], "stage_id": v["stage_id"],
+                                     "stage_name": v["stage_name"], "cause": v["cause"],
+                                     "cause_name": names.get(v["cause"]) if v["cause"] else None}}
+                      for k, v in predicted.items()],
+            "causes": [{"key": k, "name": v} for k, v in names.items()],
+            "items": rows,
+            # 평가용 관측만으로 맞춘 정도 (보정용과 섞지 않는다, CAL-18)
+            "summary": obs.summary([r for r in rows if r["purpose"] == "evaluation"] or rows),
+            "summary_basis": "evaluation" if any(r["purpose"] == "evaluation" for r in rows) else "all"}
+
+
+class ObservationListView(BaseAPIView):
+    """GET·POST /api/v1/projects/{id}/human-observations — 목록·예측과 일치 요약 / 저장(같은 참여자×과업은 덮어씀)"""
+
+    def get(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        return Response(_observations_payload(project))
+
+    def post(self, request, project_id):
+        from . import observations as obs
+        from .models import HumanObservation
+        project = get_owned_project(request.user, project_id)
+        predicted, report = obs.predictions(project)
+        if report is None:
+            raise ApiError(409, "NO_PREDICTION", "먼저 사전 테스트를 한 번 실행해야 비교할 수 있어요.")
+        data = obs.clean(project, request.data, predicted)
+        row, created = HumanObservation.objects.update_or_create(
+            project=project, participant_code=data["participant_code"], task_id=data["task_id"],
+            defaults={**data, "source": HumanObservation.Source.MANUAL, "created_by": request.user})
+        return Response({"replaced": not created, **_observations_payload(project)},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class ObservationImportView(BaseAPIView):
+    """POST /api/v1/projects/{id}/human-observations/import {task_id, purpose?, record} — recorder.js 결과 파일"""
+
+    def post(self, request, project_id):
+        from . import observations as obs
+        from .models import HumanObservation
+        project = get_owned_project(request.user, project_id)
+        predicted, report = obs.predictions(project)
+        if report is None:
+            raise ApiError(409, "NO_PREDICTION", "먼저 사전 테스트를 한 번 실행해야 비교할 수 있어요.")
+        task_id = request.data.get("task_id")
+        if task_id not in predicted:
+            raise ApiError(422, "VALIDATION_ERROR", "비교할 과업을 골라 주세요.", {"task_id": ["과업"]})
+        draft = obs.from_recorder(request.data.get("record"), task_id,
+                                  request.data.get("purpose") or "calibration", predicted)
+        data = obs.clean(project, draft, predicted)
+        row, created = HumanObservation.objects.update_or_create(
+            project=project, participant_code=data["participant_code"], task_id=data["task_id"],
+            defaults={**data, "source": HumanObservation.Source.RECORDER, "created_by": request.user})
+        return Response({"replaced": not created, **_observations_payload(project)},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class ObservationDetailView(BaseAPIView):
+    """DELETE /api/v1/human-observations/{id}"""
+
+    def delete(self, request, observation_id):
+        from .models import HumanObservation
+        row = HumanObservation.objects.select_related("project").filter(pk=observation_id).first()
+        if row is None:
+            raise ApiError(404, "NOT_FOUND", "관측을 찾을 수 없습니다.")
+        ensure_owner(request.user, row.project)
+        row.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

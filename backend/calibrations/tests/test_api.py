@@ -131,3 +131,111 @@ class CalibrationApiTests(WizardMixin, TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(f"{self.url}/calibration/proposal").status_code, 403)
         self.assertEqual(self.client.get(f"{self.url}/calibrations").status_code, 403)
+
+    # K03 보정 전·후 비교 (CAL-15): 보정으로 돈 첫 사전 테스트가 생기면 같은 실측 기간으로 비교한다
+    def test_waiting_then_ready_after_a_run_with_the_revision(self, _):
+        from runs.models import Run
+        self.prepare()
+        self.client.post(f"{self.url}/calibrations", {"expected_revision": 0, "keys": ["segment_1.threshold"]},
+                         format="json")
+        waiting = self.client.get(f"{self.url}/calibration/compare").json()
+        self.assertEqual(waiting["status"], "waiting")
+        self.assertEqual([s["stage_id"] for s in waiting["stages"] if s["gap"]], ["/cart"])
+        self.assertIsNone(self.client.get(f"{self.url}/calibrations").json()["items"][0]["error_after_pp"])
+
+        snapshot = ReportSnapshot.objects.get().plan_snapshot
+        run = Run.objects.create(project=self.project, created_by=self.user, sequence_no=2, plan_snapshot=snapshot,
+                                 status=Run.Status.COMPLETED, config={"calibration_revision": 1})
+        ReportSnapshot.objects.create(plan_snapshot=snapshot, run=run, run_ref=str(run.id), revision=1,
+                                      status="final", source="database", data=AFTER_REPORT)
+        ready = self.client.get(f"{self.url}/calibration/compare?revision=1").json()
+        self.assertEqual((ready["status"], ready["after"]["run_sequence"]), ("ready", 2))
+        cart = next(s for s in ready["stages"] if s["stage_id"] == "/cart")
+        self.assertEqual(cart["change"], "차이 구간 해소")
+        self.assertEqual((ready["before"]["gaps"], ready["after"]["gaps"]), (1, 0))
+        self.assertIsNotNone(self.client.get(f"{self.url}/calibrations").json()["items"][0]["error_after_pp"])
+        self.assertEqual(self.client.get(f"{self.url}/calibration/compare?revision=9").status_code, 404)
+
+
+AFTER_REPORT = {"tasks": [{
+    **REPORT["tasks"][0],
+    "journey_funnel": {**REPORT["tasks"][0]["journey_funnel"],
+                       "stages": [_stage("/", "첫 화면", 20), _stage("/products/:id", "상품 상세", 16),
+                                  _stage("/cart", "장바구니", 8), _stage("/order/success", "주문 완료", 5, goal=True)]},
+}]}
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class ObservationTests(WizardMixin, TestCase):
+    """K04 사람 관측 (CAL-16~18)."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = f"/api/v1/projects/{self.project.id}/human-observations"
+
+    def report(self):
+        snapshot = PlanSnapshot.objects.get(pk=self.confirm()["plan_revision_id"])
+        data = {"tasks": [{**REPORT["tasks"][0], "success": 5, "dropout": 15,
+                           "journey_funnel": {**REPORT["tasks"][0]["journey_funnel"], "stages": [
+                               {**_stage("/", "첫 화면", 20), "dropouts_here": 0, "order": 0},
+                               {**_stage("/cart", "장바구니", 12), "dropouts_here": 7, "order": 1},
+                               {**_stage("/order/success", "주문 완료", 5, True), "dropouts_here": 0, "order": 2}]}}]}
+        ReportSnapshot.objects.create(plan_snapshot=snapshot, run_ref="r1", revision=1, status="final",
+                                      source="database", data=data)
+
+    def post(self, **body):
+        return self.client.post(self.url, {"task_id": "order", **body}, format="json")
+
+    def test_save_compare_and_overwrite(self, _):
+        self.report()
+        res = self.post(participant_code="H-001", outcome="dropout", stage_id="/cart", cause="cost")
+        self.assertEqual((res.status_code, res.json()["replaced"]), (201, False))
+        self.post(participant_code="H-002", outcome="success")
+        self.post(participant_code="H-003", outcome="dropout", stage_id="/", cause="unknown")
+        body = self.client.get(self.url).json()
+        self.assertEqual(body["tasks"][0]["predicted"],
+                         {"outcome": "dropout", "stage_id": "/cart", "stage_name": "장바구니", "cause": "cost",
+                          "cause_name": "비용 충격"})
+        rows = {r["participant_code"]: r["match"] for r in body["items"]}
+        self.assertEqual(rows["H-001"], {"outcome": True, "stage": True, "cause": True})
+        self.assertEqual(rows["H-002"], {"outcome": False, "stage": None, "cause": None})
+        self.assertEqual(rows["H-003"], {"outcome": True, "stage": False, "cause": None})   # 원인 미상은 원인 분모에서 뺌
+        self.assertEqual(body["summary"], {"outcome": {"matched": 2, "total": 3}, "stage": {"matched": 1, "total": 2},
+                                           "cause": {"matched": 1, "total": 1}})
+        again = self.post(participant_code="H-002", outcome="dropout", stage_id="/cart", cause="trust")
+        self.assertEqual((again.status_code, again.json()["replaced"]), (200, True))
+        self.assertEqual(len(again.json()["items"]), 3)
+
+    def test_validation(self, _):
+        self.assertEqual(self.post(participant_code="H-1", outcome="success").json()["error"]["code"], "NO_PREDICTION")
+        self.report()
+        for body, field in ((dict(participant_code="참여자 1", outcome="success"), "participant_code"),
+                            (dict(participant_code="H-1", outcome="success", stage_id="/cart"), "outcome"),
+                            (dict(participant_code="H-1", outcome="dropout", stage_id="/nope", cause="cost"), "stage_id"),
+                            (dict(participant_code="H-1", outcome="dropout", stage_id="/cart", cause="mood"), "cause"),
+                            (dict(participant_code="H-1", outcome="success", name="김"), "name")):
+            with self.subTest(field=field):
+                res = self.post(**body)
+                self.assertEqual(res.status_code, 422, res.content)
+                self.assertIn(field, res.json()["error"]["fields"])
+
+    def test_import_recorder_file(self, _):
+        self.report()
+        record = {"schema": "human-record-1", "participant_id": "P07", "outcome": "give_up",
+                  "events": [{"type": "view", "path": "/"}, {"type": "view", "path": "/Cart/"}]}
+        res = self.client.post(self.url + "/import", {"task_id": "order", "record": record}, format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+        row = res.json()["items"][0]
+        self.assertEqual((row["participant_code"], row["outcome"], row["stage_id"], row["cause"], row["source"]),
+                         ("P07", "dropout", "/cart", "unknown", "recorder"))
+        bad = self.client.post(self.url + "/import", {"task_id": "order", "record": {"schema": "x"}}, format="json")
+        self.assertEqual(bad.status_code, 422)
+
+    def test_delete_and_owner_only(self, _):
+        self.report()
+        row = self.post(participant_code="H-1", outcome="success").json()["items"][0]
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/v1/human-observations/{row['id']}").status_code, 403)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.delete(f"/api/v1/human-observations/{row['id']}").status_code, 204)

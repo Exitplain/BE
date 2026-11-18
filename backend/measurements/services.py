@@ -211,8 +211,8 @@ def suggest(step_id, stage_ids):
     return None, None
 
 
-def mapping_dict(project, site):
-    report = latest_report(project)
+def mapping_dict(project, site, report=None):
+    report = report or latest_report(project)
     stages = prediction_stages(report)
     stage_ids = [s["id"] for s in stages]
     counts = {r["step_id"]: r for r in steps(site, MAPPING_DAYS)["items"]}
@@ -363,11 +363,12 @@ def _segments(report):
     return [{"id": sid, "name": names[sid], "count": n} for sid, n in counts.items()]
 
 
-def funnel_dict(project, site, days, device):
-    report = latest_report(project)
+def funnel_dict(project, site, days, device, report=None):
+    """report 를 주면 그 리포트를 예측 기준으로 쓴다 (보정 전·후 비교, CAL-15). 없으면 가장 최근 기준 리포트."""
+    report = report or latest_report(project)
     stage_ids = {s["id"] for s in prediction_stages(report)}
     mapping = {}
-    for row in mapping_dict(project, site)["rows"] if report else []:
+    for row in mapping_dict(project, site, report)["rows"] if report else []:
         if row["stage_id"] in stage_ids:
             mapping[row["step_id"]] = row["stage_id"]
     by_stage = _stage_sessions(site, days, device, mapping) if mapping else {}
