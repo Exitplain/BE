@@ -1,5 +1,6 @@
 from django.db import IntegrityError, transaction
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from common.exceptions import ApiError
@@ -8,6 +9,7 @@ from common.views import BaseAPIView
 
 from . import compare as cmp
 from . import params as cal
+from . import participant
 from . import proposal
 from .models import CalibrationRevision
 from .services import current
@@ -175,6 +177,11 @@ def _observation_dict(row, predicted, names):
             "task_name": (predicted or {}).get("name", row.task_id), "outcome": row.outcome,
             "stage_id": row.stage_id or None, "stage_name": stage_names.get(row.stage_id) if row.stage_id else None,
             "cause": row.cause or None, "cause_name": names.get(row.cause) if row.cause else None,
+            "pain_stage_id": row.pain_stage_id or None,
+            "pain_stage_name": stage_names.get(row.pain_stage_id) if row.pain_stage_id else None,
+            "pain_cause": row.pain_cause or None,
+            "pain_cause_name": names.get(row.pain_cause) if row.pain_cause else None,
+            "discomfort": row.discomfort,
             "purpose": row.purpose, "source": row.source, "updated_at": row.updated_at.isoformat(),
             "match": obs.match(row, predicted)}
 
@@ -192,7 +199,8 @@ def _observations_payload(project):
             "tasks": [{"task_id": k, "name": v["name"], "stages": v["stages"],
                        "predicted": {"outcome": v["outcome"], "stage_id": v["stage_id"],
                                      "stage_name": v["stage_name"], "cause": v["cause"],
-                                     "cause_name": names.get(v["cause"]) if v["cause"] else None}}
+                                     "cause_name": names.get(v["cause"]) if v["cause"] else None,
+                                     "pain_top": v["pain_top"]}}
                       for k, v in predicted.items()],
             "causes": [{"key": k, "name": v} for k, v in names.items()],
             "items": rows,
@@ -257,3 +265,70 @@ class ObservationDetailView(BaseAPIView):
         ensure_owner(request.user, row.project)
         row.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------- 참여자 응답 링크 (PART-01~05) ----------
+
+class ParticipantLinkListView(BaseAPIView):
+    """GET·POST /api/v1/projects/{id}/participant-links — 담당자: 목록 / 만들기 {task_id, purpose?, days?, max_responses?}"""
+
+    def get(self, request, project_id):
+        from . import observations as obs
+        from .models import ParticipantLink
+        project = get_owned_project(request.user, project_id)
+        predicted, _ = obs.predictions(project)
+        links = ParticipantLink.objects.filter(project=project)[:50]
+        return Response({"items": [participant.owner_dict(link, predicted) for link in links]})
+
+    def post(self, request, project_id):
+        from . import observations as obs
+        project = get_owned_project(request.user, project_id)
+        link = participant.create(project, request.user, request.data)
+        return Response(participant.owner_dict(link, obs.predictions(project)[0]), status=status.HTTP_201_CREATED)
+
+
+class ParticipantLinkDisableView(BaseAPIView):
+    """POST /api/v1/participant-links/{id}/disable — 담당자: 링크 닫기 (응답 기록은 남는다)"""
+
+    def post(self, request, link_id):
+        from django.utils import timezone
+
+        from .models import ParticipantLink
+        link = ParticipantLink.objects.select_related("project").filter(pk=link_id).first()
+        if link is None:
+            raise ApiError(404, "NOT_FOUND", "링크를 찾을 수 없어요.")
+        ensure_owner(request.user, link.project)
+        if link.disabled_at is None:
+            link.disabled_at = timezone.now()
+            link.save(update_fields=["disabled_at"])
+        return Response(participant.owner_dict(link))
+
+
+class PublicParticipantView(BaseAPIView):
+    """GET /api/v1/participant-links/{token} — 공개: 과업 안내·단계 캡처·이유 목록 (로그인 없음)"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        return Response(participant.public_dict(participant.open_link(token)))
+
+
+class PublicParticipantResponseView(BaseAPIView):
+    """POST /api/v1/participant-links/{token}/responses — 공개: {client_id, outcome, pain_stage_id?, pain_cause?, discomfort?}"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request, token):
+        link = participant.open_link(token)
+        return Response(participant.submit(link, request.data), status=status.HTTP_201_CREATED)
+
+
+class PublicParticipantScreenView(BaseAPIView):
+    """GET /api/v1/participant-links/{token}/screens/{observation_id} — 공개: 그 과업 단계 캡처만"""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, token, observation_id):
+        from runs.views import _ScreenshotView
+        link = participant.open_link(token)
+        return _ScreenshotView.serve(participant.screenshot_path(link, observation_id))
