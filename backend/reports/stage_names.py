@@ -18,7 +18,7 @@ from django.conf import settings
 from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
-MODEL = os.environ.get("EXITPLAIN_STAGE_NAMER_MODEL", "claude-haiku-4-5")
+MODEL = (os.environ.get("EXITPLAIN_STAGE_NAMER_MODEL") or os.environ.get("DROPSPOT_DEFAULT_MODEL") or "claude-haiku-4-5").strip()   # 기본 Haiku, .env 로 바꾼다
 MAX_NAME = 20
 
 INSTRUCTIONS = (

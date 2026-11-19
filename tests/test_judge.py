@@ -137,7 +137,7 @@ async def test_claude_judge_parses_and_fails_closed(monkeypatch):
         refused, _ = await judge.judge("업로드 화면", "목표", obs)
     finally:
         await judge.close()
-    assert ok.achieved is True and usage == {"claude-sonnet-5": {"calls": 1, "input_tokens": 50, "output_tokens": 5}}
+    assert ok.achieved is True and usage == {judge.model: {"calls": 1, "input_tokens": 50, "output_tokens": 5}}
     assert refused.achieved is False                                     # 답이 없으면 달성 안 함으로
-    assert calls[0]["model"] == "claude-sonnet-5" and calls[0]["output_format"] is Judgment
+    assert calls[0]["model"] == judge.model and calls[0]["output_format"] is Judgment
     assert "persona" not in calls[0]["messages"][0]["content"][1]["text"]  # 판정기에는 페르소나를 주지 않는다

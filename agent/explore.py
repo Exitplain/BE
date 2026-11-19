@@ -17,7 +17,9 @@ from urllib.parse import urljoin, urlsplit
 
 from pydantic import BaseModel, Field, ValidationError
 
-EXPLORE_MODEL = os.environ.get("DROPSPOT_EXPLORE_MODEL", "claude-sonnet-5")
+from .model_env import model_from_env
+
+EXPLORE_MODEL = model_from_env("DROPSPOT_EXPLORE_MODEL")   # 기본 Haiku, .env 로 바꾼다 (agent/model_env.py)
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 MAX_BUTTONS_PER_PAGE = 12     # 화면마다 눌러 볼 버튼 수
 MAX_BUTTON_PROBES = 30        # 전체 버튼 누르기 상한 (시간)

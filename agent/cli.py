@@ -36,7 +36,8 @@ def main():
     parser.add_argument("--shop", choices=["normal", "problem", "fixed"])
     parser.add_argument("--case", choices=["all", "signup", "fee", "cta"], default="all")
     # shop_scripted: 데모 쇼핑몰 화면 문구를 아는 고정 정책. 백엔드가 --input으로 쇼핑몰을 돌릴 때 쓴다 (API 키 불필요)
-    # claude: 기본 Haiku, 막힌 스텝만 Sonnet (ANTHROPIC_API_KEY 필요). --model / --escalation-model 로 바꿀 수 있다
+    # claude: 기본 모델이 고르고 막힌 스텝만 상위 모델에게 다시 묻는다 (ANTHROPIC_API_KEY 필요). 기본은 둘 다 Haiku, 서버 .env 의
+    # DROPSPOT_CLAUDE_MODEL·DROPSPOT_ESCALATION_MODEL 이나 --model / --escalation-model 로 바꿀 수 있다 (agent/model_env.py)
     parser.add_argument("--policy", choices=["scripted", "shop_scripted", "openai", "claude"], default="scripted")
     parser.add_argument("--model", help=f"Required for openai; exact model ID available to your account (claude default: {CLAUDE_MODEL})")
     parser.add_argument("--escalation-model", help=f"claude only: model for stuck steps (default: {CLAUDE_ESCALATION_MODEL})")

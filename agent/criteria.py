@@ -13,7 +13,10 @@ import os
 
 from pydantic import BaseModel, Field, ValidationError
 
-CRITERIA_MODEL = os.environ.get("DROPSPOT_CRITERIA_MODEL", os.environ.get("DROPSPOT_EXPLORE_MODEL", "claude-sonnet-5"))
+from .model_env import model_from_env
+
+# 기본 Haiku. DROPSPOT_CRITERIA_MODEL → DROPSPOT_EXPLORE_MODEL → DROPSPOT_DEFAULT_MODEL 순서로 따른다 (agent/model_env.py)
+CRITERIA_MODEL = model_from_env("DROPSPOT_CRITERIA_MODEL", "DROPSPOT_EXPLORE_MODEL")
 TEXT_LIMIT = 300
 
 

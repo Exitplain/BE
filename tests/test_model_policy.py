@@ -35,7 +35,7 @@ def test_missing_auth_is_not_silently_replaced(monkeypatch):
 def claude_policy(monkeypatch, replies):
     """replies: 모델 호출마다 돌려줄 (action 또는 None, stop_reason) 목록. 호출 기록을 함께 돌려준다."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-not-a-real-key")
-    policy = ClaudePolicy()
+    policy = ClaudePolicy("claude-haiku-4-5", "claude-sonnet-5")   # 에스컬레이션 동작을 보려고 서로 다른 두 모델을 명시한다
     calls = []
     async def parse(**kwargs):
         calls.append(kwargs)

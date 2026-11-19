@@ -60,6 +60,11 @@ sudo systemctl enable --now exitplain-worker   # run_worker 구현됨 (대기 �
 | `AGENT_POLICY` | shop_scripted / scripted / openai / claude | 데모 쇼핑몰은 shop_scripted (API 키 불필요). openai는 AGENT_MODEL·OPENAI_API_KEY 필요. claude는 ANTHROPIC_API_KEY 필요 (AGENT_MODEL 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5) |
 | `ANTHROPIC_API_KEY` | Claude API 키 | `AGENT_POLICY=claude`일 때만. 워커가 에이전트 프로세스에 그대로 물려준다. 커밋 금지 |
 | `AGENT_MODEL` | LLM 모델명 | LLM 정책일 때만 |
+| `DROPSPOT_DEFAULT_MODEL` | Claude 모델 전체 기본값 (기본 `claude-haiku-4-5`) | 아래 용도별 변수가 비어 있을 때 쓴다. 값이 비어 있으면 무시 |
+| `DROPSPOT_CLAUDE_MODEL`, `DROPSPOT_ESCALATION_MODEL` | 에이전트가 평소 고르는 모델 / 막혔을 때 다시 묻는 모델 | `AGENT_POLICY=claude`. `AGENT_MODEL`이 있으면 앞의 것은 그 값이 우선 |
+| `DROPSPOT_JUDGE_MODEL` | 성공 기준 판정 모델 | |
+| `DROPSPOT_EXPLORE_MODEL`, `DROPSPOT_CRITERIA_MODEL` | 사이트 둘러보기·과업 제안 / 직접 추가한 과업의 성공 기준 | 뒤의 것은 없으면 앞의 것을 따른다 |
+| `EXITPLAIN_PERSONA_MODEL`, `EXITPLAIN_STAGE_NAMER_MODEL` | 페르소나 생성 / 리포트 화면 이름 | 백엔드(Django)가 읽는다 |
 | `EXITPLAIN_DISCOVERY_MODE` | `demo` / `explore` | 기본 demo(고정 결과). explore는 모르는 URL을 실제로 둘러보고 Claude가 과업을 제안한다 (ANTHROPIC_API_KEY 필요, 30초~2분 걸려 gunicorn `--timeout`·Nginx `proxy_read_timeout`을 180으로 둔다) |
 | `DJANGO_SECRET_KEY` | 시크릿 키 | `DEBUG=False`인데 없으면 서버가 시작되지 않는다 |
 | `DJANGO_DEBUG` | 서버에서는 `False` | 없으면 `True`(로컬 개발 기본값) |
