@@ -148,7 +148,7 @@ def _on_login(batch, session, payload):
     if account_id:
         from testaccounts.services import record_check
         ok = bool(payload.get("ok"))
-        record_check(account_id, ok, "에이전트 로그인 성공" if ok else "에이전트 로그인 실패")
+        record_check(account_id, ok, "AI 고객 로그인 성공" if ok else "AI 고객 로그인 실패")
 
 
 def _apply(batch, event):
@@ -245,7 +245,7 @@ def finalize_task_run(task_run, *, exit_code=None, cancelled=False, error_code="
         dangling.update(status=Session.Status.CANCELLED, reason="사용자가 실행을 취소했습니다.", finished_at=now)
     else:
         dangling.update(status=Session.Status.AGENT_FAILURE, finished_at=now,
-                        reason="에이전트가 결과를 남기지 않고 종료되었습니다.")
+                        reason="AI 고객이 결과를 남기지 않고 종료되었습니다.")
 
     if cancelled:
         task_run.status = TaskRun.Status.CANCELLED
@@ -254,7 +254,7 @@ def finalize_task_run(task_run, *, exit_code=None, cancelled=False, error_code="
     else:
         task_run.status = TaskRun.Status.FAILED
         error_code = error_code or "AGENT_CRASHED"
-        error_message = error_message or f"에이전트가 summary.json 없이 종료되었습니다 (종료 코드 {exit_code})."
+        error_message = error_message or f"AI 고객이 summary.json 없이 종료되었습니다 (종료 코드 {exit_code})."
     task_run.summary = summary
     task_run.exit_code = exit_code
     task_run.finished_at = now

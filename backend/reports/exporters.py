@@ -40,11 +40,11 @@ def _funnel_section(task):
     """퍼널 표. 실행 퍼널(journey_funnel: 실제로 지나간 화면)이 있으면 그것을 쓰고,
     없으면(실행 퍼널이 생기기 전에 만든 리포트) 예전 7단계 funnel을 쓴다.
     7단계 funnel은 지나가지 않은 단계가 0명으로 찍혀서 내보내기에는 쓰지 않는다."""
-    headers = ["단계", "도달", "시드별 범위", "직전 대비", "이 단계 이탈"]
+    headers = ["단계", "도달", "반복별 범위", "직전 대비", "이 단계 이탈"]
     journey = task.get("journey_funnel") or {}
     stages = journey.get("stages") or []
     if not stages:
-        return ["### 퍼널", ""] + _table(headers, [
+        return ["### 단계별 이동", ""] + _table(headers, [
             [f["name"], f["reached"], _range(f.get("reached_range")), _pct(f.get("rate_of_previous")),
              f.get("dropouts_here", 0)] for f in task.get("funnel", [])]) + [""]
     rows = [[s["name"] if s["name"] == s["path"] else f"{s['name']} ({s['path']})",
@@ -53,8 +53,8 @@ def _funnel_section(task):
     other = journey.get("other") or {}
     if other.get("dropouts"):
         rows.append([f"기타 화면 {other.get('screens', 0)}곳", "-", "-", "-", other["dropouts"]])
-    return (["### 퍼널 (실제로 지나간 화면)", "",
-             "- 페르소나들이 실제로 지나간 화면으로 만든 단계입니다. 앞 단계를 건너뛴 세션이 있으면 직전 대비가 100%를 넘을 수 있습니다.",
+    return (["### 단계별 이동 (실제로 지나간 화면)", "",
+             "- 페르소나들이 실제로 지나간 화면으로 만든 단계입니다. 앞 단계를 건너뛴 방문이 있으면 직전 대비가 100%를 넘을 수 있습니다.",
              ""] + _table(headers, rows) + [""])
 
 def _context(report):
@@ -82,18 +82,18 @@ def report_markdown(report):
     out += [f"> {note}" for note in data.get("notes", [])] + [""]
     out += ["## 요약", ""]
     out += _table(["항목", "값"], [
-        ["예상 세션", s.get("expected_sessions", 0)], ["목표 도달", s.get("success", 0)],
+        ["예상 방문", s.get("expected_sessions", 0)], ["목표 도달", s.get("success", 0)],
         ["가상 이탈", s.get("dropout", 0)], ["기술 실패", s.get("technical", 0)],
         ["결과 없음", s.get("incomplete", 0)], ["달성률", _pct(s.get("achievement_rate"))]]) + [""]
 
     for task in data.get("tasks", []):
         ranges, kpis = task.get("seed_ranges", {}), task.get("kpis", {})
         out += [f"## 과업: {task.get('name')}", "",
-                f"- 달성률 {_pct(task.get('achievement_rate'))} (시드별 {_range(ranges.get('achievement_rate'), pct=True)})",
-                f"- 목표 도달 {task.get('success', 0)}명 (시드별 {_range(ranges.get('success'))}), "
-                f"가상 이탈 {task.get('dropout', 0)}명 (시드별 {_range(ranges.get('dropout'))}), "
+                f"- 달성률 {_pct(task.get('achievement_rate'))} (반복별 {_range(ranges.get('achievement_rate'), pct=True)})",
+                f"- 목표 도달 {task.get('success', 0)}명 (반복별 {_range(ranges.get('success'))}), "
+                f"가상 이탈 {task.get('dropout', 0)}명 (반복별 {_range(ranges.get('dropout'))}), "
                 f"기술 실패 {task.get('technical', 0)}건",
-                f"- 세션 시간 중앙값 {kpis.get('median_duration_seconds') or '-'}초, "
+                f"- 방문 시간 중앙값 {kpis.get('median_duration_seconds') or '-'}초, "
                 f"행동 수 중앙값 {kpis.get('median_steps') or '-'}", ""]
         out += _funnel_section(task)
         top = task.get("top_causes", [])
@@ -108,7 +108,7 @@ def report_markdown(report):
     failures = data.get("technical_failures", [])
     if failures:
         out += [f"## 기술 실패 ({len(failures)}건, 이탈률 계산에서 제외)", ""]
-        out += _table(["과업", "시드", "페르소나", "상태", "사유"],
+        out += _table(["과업", "반복", "페르소나", "상태", "사유"],
                       [[f["task_id"], f["seed"], f["persona_id"], f["status"], f.get("reason", "")]
                        for f in failures[:30]])
         if len(failures) > 30:

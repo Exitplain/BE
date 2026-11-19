@@ -208,7 +208,7 @@ def blocking_reasons(plan):
     if not plan.audience_context.strip():
         reasons.append({"step": 2, "code": "NO_AUDIENCE", "message": "타겟 고객 설명을 입력해주세요."})
     if {f["task_id"] for f in plan.task_funnels} != set(plan.task_ids):
-        reasons.append({"step": 3, "code": "FUNNEL_MISMATCH", "message": "과업과 퍼널이 맞지 않습니다."})
+        reasons.append({"step": 3, "code": "FUNNEL_MISMATCH", "message": "과업과 단계별 이동이 맞지 않습니다."})
     if uses_test_accounts(plan):
         from testaccounts.services import MIN_ACCOUNTS, account_count
         if account_count(plan.project) < MIN_ACCOUNTS:

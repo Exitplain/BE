@@ -77,7 +77,7 @@ def load_session_from_db(run, task_id, seed, persona_id):
     session = (Session.objects.select_related("task_run").filter(run=run, task_id=task_id, seed=seed,
                                                                   persona_snapshot__code=persona_id).first())
     if session is None:
-        raise SessionNotFound("이 실행에 해당 페르소나의 세션이 없습니다.")
+        raise SessionNotFound("이 실행에 해당 페르소나의 방문이 없습니다.")
     task_input = session.task_run.input_json or {}
     success_path, stage_paths = task_input.get("success_path"), task_input.get("stage_paths") or {}
     timeline, by_id = [], {}
@@ -119,7 +119,7 @@ def load_session(attempt_dir, persona_id):
     session_id = f"session_{persona_id}"
     events = _events(attempt_dir, session_id)
     if not events:
-        raise SessionNotFound("이 실행에 해당 페르소나의 세션이 없습니다.")
+        raise SessionNotFound("이 실행에 해당 페르소나의 방문이 없습니다.")
     run_input = json.loads((attempt_dir / "input.json").read_text(encoding="utf-8"))
     success_path, stage_paths = run_input.get("success_path"), run_input.get("stage_paths") or {}
 

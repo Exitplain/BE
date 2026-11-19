@@ -92,8 +92,8 @@ def project_issues(project):
             dropouts = sum(info["seeds"].values())
             stage = _stage_name(stage_key, info["screen_names"], stage_names)
             cause = causes.get(cause_key, "원인 미상")
-            evidence = (f"'{info['task_name']}' 과업에서 가상 세션 {dropouts}개가 '{stage}' 화면에서 이탈했고, "
-                        f"주된 원인은 '{cause}'로 기록됐어요 (유효 세션 {info['valid']}개 중).")
+            evidence = (f"'{info['task_name']}' 과업에서 가상 방문 {dropouts}개가 '{stage}' 화면에서 이탈했고, "
+                        f"주된 원인은 '{cause}'로 기록됐어요 (유효 방문 {info['valid']}개 중).")
             if verdict == "계속 발생":
                 evidence += f" 이전 실행 {len(seen) - 1}번에서도 같은 문제가 있었어요."
             first = seen[0]

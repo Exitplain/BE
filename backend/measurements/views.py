@@ -43,7 +43,7 @@ class MeasurementView(BaseAPIView):
     def post(self, request, project_id):
         project = get_owned_project(request.user, project_id)
         if not services.deployed(project):
-            raise ApiError(409, "NOT_DEPLOYED", "실측 분석은 실제 방문자가 오는 배포 주소가 있어야 해요.")
+            raise ApiError(409, "NOT_DEPLOYED", "실제 고객 데이터 분석은 실제 방문자가 오는 배포 주소가 있어야 해요.")
         site = services.site_for(project, create=True)
         return Response(services.status_dict(request, project, site))
 

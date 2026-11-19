@@ -63,7 +63,7 @@ class IssueTests(WizardMixin, TestCase):
         self.assertEqual((issue["impact"], issue["dropouts"]), ([1, 2], 3))     # 시드 1에 2명, 시드 2에 1명
         self.assertEqual((issue["verdict"], issue["run_id"]), ("재테스트 전", "run1"))
         self.assertEqual(issue["project_name"], "반찬로드")
-        self.assertIn("가상 세션 3개", issue["evidence"])
+        self.assertIn("가상 방문 3개", issue["evidence"])
 
     def test_retest_marks_continuing_and_new_and_drops_resolved(self, _):
         self.make_run("run1", {1: {"P-001": SIGNUP_DROP, "P-002": SIGNUP_DROP}, 2: {"P-001": PAY_DROP}})

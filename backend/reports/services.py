@@ -103,7 +103,7 @@ def session_detail(report, task_id, seed, persona_id):
     row = next((r for r in report.data.get("sessions", []) if r["task_id"] == task_id and r["seed"] == seed
                 and r["persona_id"] == persona_id), None)
     if row is None:
-        raise ApiError(404, "NOT_FOUND", "이 리포트에 없는 세션입니다.")
+        raise ApiError(404, "NOT_FOUND", "이 리포트에 없는 방문입니다.")
     persona = next((p for p in report.plan_snapshot.data.get("personas", []) if p["code"] == persona_id), {})
     try:
         if report.run_id:   # 실제 실행: A의 DB에서 읽는다
@@ -112,7 +112,7 @@ def session_detail(report, task_id, seed, persona_id):
             attempt = session_files.find_attempt(report.run_ref, task_id, seed, persona_id)
             detail = session_files.load_session(attempt, persona_id)
     except session_files.SessionNotFound as exc:
-        raise ApiError(409, "SESSION_FILES_MISSING", f"세션 기록을 찾지 못했습니다: {exc}") from exc
+        raise ApiError(409, "SESSION_FILES_MISSING", f"방문 기록을 찾지 못했습니다: {exc}") from exc
     _name_screens(report, detail)
     task = next((t for t in report.plan_snapshot.data.get("tasks", []) if t["id"] == task_id), {})
     return {"report_id": str(report.id), "run_ref": report.run_ref, "task": {"id": task_id, "name": task.get("name")},

@@ -68,7 +68,7 @@ class CalibrationApiTests(WizardMixin, TestCase):
         self.assertEqual(set(items), {"*.weight.cost", "segment_1.threshold"})
         self.assertEqual((items["segment_1.threshold"]["current"], items["segment_1.threshold"]["proposed"]), (1.0, 0.8))
         self.assertEqual((items["*.weight.cost"]["proposed"], items["*.weight.cost"]["label"]),
-                         (1.2, "마찰 가중치 · 비용 충격"))
+                         (1.2, "불편한 점 가중치 · 비용 충격"))
         self.assertIn("장바구니", items["segment_1.threshold"]["reason"])
         self.assertIsNone(body["after_error"])                                  # CAL-10: 다음 실행을 기다린다
         self.assertEqual(self.proposal(), body)                                 # 같은 입력 → 같은 결과
@@ -94,7 +94,7 @@ class CalibrationApiTests(WizardMixin, TestCase):
         history = self.client.get(f"{self.url}/calibrations").json()["items"]
         self.assertEqual([h["revision"] for h in history], [1])
         self.assertIn("빠른 구매형 인내심 임계치 1.00→0.80", history[0]["changes_summary"])
-        self.assertEqual(history[0]["base_comparison"], "사전 테스트 vs 실측 최근 7일")
+        self.assertEqual(history[0]["base_comparison"], "사전 테스트 vs 실제 고객 데이터 최근 7일")
         self.assertIsNone(history[0]["error_after_pp"])
 
         first = CalibrationRevision.objects.get(project=self.project, revision=1)
@@ -418,7 +418,7 @@ class CombinedEvidenceTests(WizardMixin, TestCase):
         first = self.client.get(f"{self.url}/calibration/proposal").json()
         self.assertEqual((first["provisional"], first["basis"]["evidence"], first["basis"]["count"]),
                          (True, "mixed", 7))
-        self.assertIn("실측 3세션 + 사람 관측 4명(합 7건)", first["message"])
+        self.assertIn("실제 고객 데이터 3회 방문 + 사람 관측 4명(합 7건)", first["message"])
         HumanProposalTests.observe(self, 3, "/", "value", start=4)
         body = self.client.get(f"{self.url}/calibration/proposal").json()
         self.assertEqual((body["provisional"], body["basis"]["measurement_count"], body["basis"]["observation_count"]),

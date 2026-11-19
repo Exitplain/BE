@@ -13,7 +13,7 @@ STEP = 0.05
 class ParamsError(ValueError):
     def __init__(self, fields):
         self.fields = fields
-        super().__init__("보정 값이 올바르지 않습니다.")
+        super().__init__("예측 맞추기 값이 올바르지 않습니다.")
 
 
 def snap(value):
