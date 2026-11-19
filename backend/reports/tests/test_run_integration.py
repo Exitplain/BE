@@ -86,6 +86,14 @@ class RunReportTests(WizardMixin, TestCase):
         self.assertEqual((friction["name"], friction["sessions"], friction["dropouts"], friction["detail"]),
                          ("입력 부담", 20, 10, "필수 입력 7칸 (허용 6칸)"))
         self.assertEqual(screens[2]["dropouts_here"], 10)
+        # 그 화면에서 이탈한 세션의 말 (같은 문장은 묶어 센다). 이탈이 없는 화면은 비어 있다
+        voices = screens[2]["voices"]
+        self.assertEqual(len(voices), 1)
+        self.assertEqual(voices[0]["sessions"], 10)
+        self.assertIn("그만뒀어요", voices[0]["text"])
+        self.assertIn("입력할 칸이 7개나 돼서 부담스러웠어요", voices[0]["text"])
+        self.assertTrue(voices[0]["segments"])
+        self.assertEqual(screens[1]["voices"], [])
         self.assertEqual(order["problems"][0]["screen_id"], "/product")    # 마찰이 가장 많은 화면이 먼저
         self.assertEqual(order["causes"], [{
             "category": "input_burden", "name": "입력 부담", "sessions": 20, "dropouts": 10,
