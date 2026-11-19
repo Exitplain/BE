@@ -298,7 +298,8 @@ class LoopStatusTests(ProjectApiBase):
     def test_new_project_is_unconnected_and_before_calibration(self):
         project = self.project()
         measurement, calibration = self.loops(project)
-        self.assertEqual(measurement, {"status": "unconnected", "last_received_at": None, "last_imported_at": None})
+        self.assertEqual(measurement, {"status": "unconnected", "last_received_at": None, "last_imported_at": None,
+                                       "mapping_saved_at": None})
         self.assertEqual(calibration, {"status": "before", "revision": None, "applied_at": None,
                                        "mean_error_pp": None})
 
@@ -329,11 +330,15 @@ class LoopStatusTests(ProjectApiBase):
         project = self.project()
         site = MeasureSite.objects.create(project=project)
         self.assertEqual(self.loops(project)[0],
-                         {"status": "waiting", "last_received_at": None, "last_imported_at": None})
+                         {"status": "waiting", "last_received_at": None, "last_imported_at": None,
+                          "mapping_saved_at": None})
         received = timezone.now()
         MeasureSite.objects.filter(pk=site.pk).update(last_received_at=received)
         self.assertEqual(self.loops(project)[0], {"status": "connected", "last_received_at": received.isoformat(),
-                                                  "last_imported_at": None})
+                                                  "last_imported_at": None, "mapping_saved_at": None})
+        saved = timezone.now()
+        MeasureSite.objects.filter(pk=site.pk).update(mapping_saved_at=saved)
+        self.assertEqual(self.loops(project)[0]["mapping_saved_at"], saved.isoformat())
 
     def test_csv_import_counts_as_connected_without_script(self):
         from measurements.models import MeasureImport, MeasureSite
