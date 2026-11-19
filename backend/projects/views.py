@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from common.exceptions import ApiError
 from common.projects import get_owned_project
 from common.views import BaseAPIView
 
@@ -29,12 +30,28 @@ class ProjectListCreateView(BaseAPIView):
 
 
 class ProjectDetailView(BaseAPIView):
-    """GET /api/v1/projects/{id} — C05 프로젝트 개요 (남의 프로젝트는 403, 샘플 프로젝트는 로그인 없이도 볼 수 있다)"""
+    """GET /api/v1/projects/{id} — C05 프로젝트 개요 (남의 프로젝트는 403, 샘플 프로젝트는 로그인 없이도 볼 수 있다)
+    DELETE /api/v1/projects/{id} — 삭제(보관). 소유자만, 샘플 403, 진행 중 실행 409. 기록은 남고 되살릴 수 있다 (204)
+    """
 
     permission_classes = [AllowAny]
 
     def get(self, request, project_id):
         project = get_viewable_project(request.user, project_id)
+        return Response(services.project_detail(project))
+
+    def delete(self, request, project_id):
+        if not request.user.is_authenticated:
+            raise ApiError(401, "AUTH_REQUIRED", "로그인이 필요합니다.")
+        services.archive_project(get_owned_project(request.user, project_id))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProjectRestoreView(BaseAPIView):
+    """POST /api/v1/projects/{id}/restore — 삭제(보관)한 프로젝트 되살리기 (같은 주소가 이미 있으면 409)"""
+
+    def post(self, request, project_id):
+        project = services.restore_project(get_owned_project(request.user, project_id))
         return Response(services.project_detail(project))
 
 

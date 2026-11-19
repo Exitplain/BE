@@ -196,3 +196,40 @@ def project_detail(project):
         "measurement": _measurement(annotated), "calibration": _calibration(annotated),
         "created_at": project.created_at.isoformat(), "updated_at": project.updated_at.isoformat(),
     }
+
+
+# ---------- 삭제(보관)·되살리기 ----------
+#
+# 삭제는 보관(archived_at)으로 한다. 실행·리포트·화면 캡처·실측·보정 기록은 지우지 않아 되살릴 수 있다.
+# 목록·사이드바·샘플 목록은 보관한 프로젝트를 이미 빼고 보여 준다. 같은 주소로 새 프로젝트도 다시 만들 수 있다.
+# 보관하면 참여자 응답 링크를 닫고, 실측 수집도 받지 않는다 (measurements.services.collect).
+
+def archive_project(project):
+    from django.utils import timezone
+
+    from common.exceptions import ApiError
+    if project.is_sample:
+        raise ApiError(403, "FORBIDDEN", "샘플 프로젝트는 삭제할 수 없어요.")
+    Run = _run_model()
+    if Run.objects.filter(project=project, status__in=Run.ACTIVE_STATUSES).exists():
+        raise ApiError(409, "RUN_IN_PROGRESS", "진행 중인 테스트가 있어요. 끝나거나 중지한 뒤에 삭제해 주세요.")
+    if project.archived_at is None:
+        now = timezone.now()
+        project.archived_at = now
+        project.save(update_fields=["archived_at", "updated_at"])
+        from calibrations.models import ParticipantLink
+        ParticipantLink.objects.filter(project=project, disabled_at__isnull=True).update(disabled_at=now)
+    return project
+
+
+def restore_project(project):
+    from common.exceptions import ApiError
+    if project.archived_at is None:
+        return project
+    if Project.objects.filter(owner=project.owner, archived_at__isnull=True, entry_url=project.entry_url) \
+            .exclude(pk=project.pk).exists():
+        raise ApiError(409, "DUPLICATE_PROJECT", "같은 주소의 프로젝트가 이미 있어요. 그 프로젝트를 먼저 삭제해 주세요.",
+                       {"entry_url": ["같은 주소의 프로젝트가 있어요."]})
+    project.archived_at = None
+    project.save(update_fields=["archived_at", "updated_at"])
+    return project

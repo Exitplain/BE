@@ -333,3 +333,56 @@ class LoopStatusTests(ProjectApiBase):
         three, items = list_queries()
         self.assertEqual(one, three)                   # 프로젝트가 늘어도 쿼리 수는 같다
         self.assertEqual(sorted(p["calibration"]["mean_error_pp"] for p in items), [10.0, 11.0, 12.0])
+
+class DeleteTests(ProjectApiBase):
+    """DELETE /projects/{id}: 보관(archived_at)으로 지우고, 기록은 남기며 되살릴 수 있다."""
+
+    def test_delete_hides_from_list_and_restore_brings_it_back(self):
+        project = self.project()
+        self.assertEqual(self.client.delete(f"{URL}/{project.pk}").status_code, 204)
+        project.refresh_from_db()
+        self.assertIsNotNone(project.archived_at)
+        self.assertEqual(self.client.get(URL).json()["items"], [])                 # 사이드바·목록에서 빠짐
+        self.assertEqual(self.client.delete(f"{URL}/{project.pk}").status_code, 204)  # 두 번 지워도 같음
+        back = self.client.post(f"{URL}/{project.pk}/restore")
+        self.assertEqual((back.status_code, back.json()["archived_at"]), (200, None))
+        self.assertEqual(len(self.client.get(URL).json()["items"]), 1)
+
+    def test_same_url_can_be_created_again_and_then_restore_conflicts(self):
+        old = self.project()
+        self.client.delete(f"{URL}/{old.pk}")
+        created = self.post(name="반찬로드 2", entry_url="https://banchanroad.example/")
+        self.assertEqual(created.status_code, 201, created.content)
+        res = self.client.post(f"{URL}/{old.pk}/restore")
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "DUPLICATE_PROJECT"))
+
+    def test_blocks_running_tests_samples_and_other_owners(self):
+        project = self.project()
+        snapshot = make_snapshot(project, self.user)
+        make_run(project, self.user, snapshot, sequence_no=1, status=Run.Status.RUNNING)
+        res = self.client.delete(f"{URL}/{project.pk}")
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "RUN_IN_PROGRESS"))
+        sample = self.project(name="샘플", url="https://sample.example/", is_sample=True)
+        self.assertEqual(self.client.delete(f"{URL}/{sample.pk}").status_code, 403)
+        theirs = self.project(owner=self.other, url="https://theirs.example/")
+        self.assertEqual(self.client.delete(f"{URL}/{theirs.pk}").status_code, 403)
+        self.client.logout()
+        self.assertEqual(self.client.delete(f"{URL}/{project.pk}").status_code, 401)
+
+    def test_delete_closes_participant_links_and_stops_collection(self):
+        import json as _json
+
+        from django.test import Client
+
+        from calibrations.models import ParticipantLink
+        from measurements.models import MeasureHit, MeasureSite
+        project = self.project()
+        link = ParticipantLink.objects.create(project=project, token="tok-1", task_id="order", created_by=self.user,
+                                              expires_at=timezone.now() + timedelta(days=1))
+        site = MeasureSite.objects.create(project=project)
+        self.client.delete(f"{URL}/{project.pk}")
+        link.refresh_from_db()
+        self.assertIsNotNone(link.disabled_at)
+        Client().post("/api/v1/collect", _json.dumps({"key": site.key, "sid": "abcd1234", "path": "/"}),
+                      content_type="text/plain", HTTP_ORIGIN="https://banchanroad.example")
+        self.assertEqual(MeasureHit.objects.count(), 0)
