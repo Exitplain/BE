@@ -95,6 +95,8 @@ def collect(body, origin):
     if site is None:
         return False
     origin = (origin or "").rstrip("/").lower()
+    if site.project.archived_at is not None:          # 삭제(보관)한 프로젝트는 받지 않는다
+        return False
     if origin not in origins_of(site.project) or _over_limit(site):
         return False
     MeasureHit.objects.create(site=site, sid=hit["sid"], path=hit["path"], step=hit["step"], device=hit["device"])
