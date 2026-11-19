@@ -23,7 +23,7 @@ from plans.catalog import AGE_OPTIONS
 from .generators import GenerationError
 
 NAME = "claude-v1"
-MODEL = os.environ.get("EXITPLAIN_PERSONA_MODEL", "claude-sonnet-5")
+MODEL = (os.environ.get("EXITPLAIN_PERSONA_MODEL") or os.environ.get("DROPSPOT_DEFAULT_MODEL") or "claude-haiku-4-5").strip()   # 기본 Haiku, .env 로 바꾼다
 LOW, HIGH = 5, 95
 
 INSTRUCTIONS = (

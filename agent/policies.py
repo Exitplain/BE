@@ -2,6 +2,7 @@ import base64
 import json
 import os
 from pydantic import ValidationError
+from .model_env import model_from_env
 from .schemas import Action
 
 # LLM 정책(OpenAI·Claude) 공통 지시문. 페르소나·목표·화면은 매 요청의 사용자 메시지로 넘긴다.
@@ -65,8 +66,10 @@ class OpenAIPolicy:
         await self.client.close()
 
 
-CLAUDE_MODEL = "claude-haiku-4-5"
-CLAUDE_ESCALATION_MODEL = "claude-sonnet-5"
+# 기본은 둘 다 Haiku. 서버 .env 의 DROPSPOT_CLAUDE_MODEL·DROPSPOT_ESCALATION_MODEL(또는 전체 기본 DROPSPOT_DEFAULT_MODEL)로 바꾼다.
+# 실행마다 --model(AGENT_MODEL)·--escalation-model 로 덮어쓸 수도 있다 (agent/model_env.py, agent/cli.py)
+CLAUDE_MODEL = model_from_env("DROPSPOT_CLAUDE_MODEL")
+CLAUDE_ESCALATION_MODEL = model_from_env("DROPSPOT_ESCALATION_MODEL")
 
 
 def _repeating(history):
@@ -79,7 +82,7 @@ def _repeating(history):
 
 
 class ClaudePolicy:
-    """Claude 두뇌. 평소 스텝은 기본 모델(Haiku)이 고르고, 막힌 순간에만 상위 모델(Sonnet)에게 묻는다.
+    """Claude 두뇌. 평소 스텝은 기본 모델이 고르고, 막힌 순간에만 상위 모델에게 묻는다 (기본은 둘 다 Haiku, .env 로 바꾼다).
 
     상위 모델로 넘기는 조건은 행동 기록만 본다 (사이트별 정답·문제 위치는 쓰지 않는다):
     - 같은 행동을 연달아 두 번 했다: 화면이 안 바뀌어 헤매는 중이라 처음부터 상위 모델에게 묻는다.

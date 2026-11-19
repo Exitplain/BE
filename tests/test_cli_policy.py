@@ -47,14 +47,14 @@ def test_openai_policy_is_really_used(tmp_path, monkeypatch):
     assert (summary["policy"], summary["model"], summary["model_driven"]) == ("openai", "test-model", True)
 
 
-def test_claude_policy_defaults_to_haiku_with_sonnet_escalation(tmp_path, monkeypatch):
+def test_claude_policy_defaults_to_haiku_for_both_models(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-not-a-real-key")
     used, summary = run_cli(tmp_path, monkeypatch, "--policy", "claude")
     policy = used[0]()
     assert isinstance(policy, ClaudePolicy)
-    assert (policy.model, policy.escalation_model) == ("claude-haiku-4-5", "claude-sonnet-5")
+    assert (policy.model, policy.escalation_model) == ("claude-haiku-4-5", "claude-haiku-4-5")
     assert (summary["policy"], summary["model"], summary["escalation_model"], summary["model_driven"]) == \
-        ("claude", "claude-haiku-4-5", "claude-sonnet-5", True)
+        ("claude", "claude-haiku-4-5", "claude-haiku-4-5", True)
 
 
 def test_claude_policy_requires_credentials_before_launching(tmp_path, monkeypatch):

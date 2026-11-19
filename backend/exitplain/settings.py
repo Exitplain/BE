@@ -294,7 +294,7 @@ ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RU
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
-# claude 는 ANTHROPIC_API_KEY 가 필요하다. AGENT_MODEL 을 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5 (agent/policies.py ClaudePolicy)
+# claude 는 ANTHROPIC_API_KEY 가 필요하다. AGENT_MODEL 을 비우면 Haiku 4.5, 막힌 스텝도 Haiku 4.5 (DROPSPOT_CLAUDE_MODEL·DROPSPOT_ESCALATION_MODEL·DROPSPOT_DEFAULT_MODEL 로 바꾼다, agent/model_env.py)
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
 # 성공 경로 없이 말로 쓴 성공 기준(success_criteria)만 있는 과업(직접 추가한 과업·사이트 확인으로 만든 과업)은
 # 정해진 흐름만 아는 scripted·shop_scripted 로는 못 하므로, 그 과업만 이 정책으로 돌린다 (ANTHROPIC_API_KEY 필요)
