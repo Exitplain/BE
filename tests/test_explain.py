@@ -1,7 +1,7 @@
 from agent.explain import describe
 
 
-def test_dropout_names_screen_cause_score_and_last_action():
+def test_dropout_reads_like_the_persona_talking():
     issues = [
         {"category": "navigation", "stage": "browse"},
         {"category": "input_burden", "primary": True, "observed_fields": 6, "configured_limit": 4,
@@ -9,19 +9,25 @@ def test_dropout_names_screen_cause_score_and_last_action():
                      "last_thought": "주문하기 버튼을 눌러 결제로 이동"}},
     ]
     text = describe("simulated_dropout", "Configured frustration threshold exceeded", issues)
-    assert text.startswith("결제 정보 화면(/checkout)에서 이탈")
-    assert "주 원인 입력 부담: 필수 입력 6칸 (허용 4칸)" in text
-    assert "불만 72/60" in text and "함께 쌓인 원인 탐색 실패" in text
-    assert text.endswith("직전 행동: 주문하기 버튼을 눌러 결제로 이동")
+    assert text == ("결제 정보 화면에서 그만뒀어요. 입력할 칸이 6개나 돼서 부담스러웠어요. "
+                    "4개 정도까지는 괜찮았을 거예요. 앞에서도 길을 헤맨 것 때문에 조금씩 지쳐 있었어요. "
+                    "그때는 '주문하기 버튼을 눌러 결제로 이동' 하려던 참이었어요.")
+    assert "72" not in text and "주 원인" not in text            # 내부 점수·용어는 문장에 넣지 않는다
 
 
-def test_old_sessions_without_dropout_record_still_get_a_line():
+def test_old_sessions_without_dropout_record_still_get_sentences():
     text = describe("simulated_dropout", "", [{"category": "cost", "primary": True}], "cart")
-    assert text.startswith("장바구니 화면에서 이탈") and "비용 충격" in text
-    assert describe("simulated_dropout", "", []) == "이탈 · 주 원인 미상"
+    assert text.startswith("장바구니 화면에서 그만뒀어요.") and "배송비" in text
+    assert describe("simulated_dropout", "", []) == "여기서 그만뒀어요. 왜 그만뒀는지는 기록이 남지 않았어요."
 
 
-def test_other_endings_are_plain_korean():
-    assert describe("success") == "목표 화면에 도달했어요"
-    assert "기술 실패" in describe("agent_failure", "Policy stopped without verified completion")
-    assert describe("site_failure", "HTTP 500").endswith("(HTTP 500)")
+def test_custom_path_stage_uses_the_path():
+    text = describe("simulated_dropout", "", [{"category": "trust", "primary": True,
+                                               "dropout": {"stage": "/delivery-check", "path": "/delivery-check"}}])
+    assert text.startswith("/delivery-check 화면에서 그만뒀어요.")
+
+
+def test_other_endings_say_it_was_not_a_dropout():
+    assert describe("success") == "끝까지 진행해서 목표 화면에 도착했어요."
+    assert describe("agent_failure", "Policy stopped without verified completion").startswith("이탈은 아니에요.")
+    assert describe("site_failure", "HTTP 500").endswith("(HTTP 500).")

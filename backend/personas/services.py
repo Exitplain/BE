@@ -1,3 +1,5 @@
+import random
+
 from common.exceptions import ApiError
 from plans.catalog import AGE_OPTIONS
 
@@ -33,21 +35,52 @@ def persona_dict(p):
             "variables": p.variables, "context": p.context, "generator": p.generator, "avatar": p.avatar}
 
 
-def create_personas(plan_snapshot, audience_context, ages, segments):
-    """plans.services.confirm_plan()이 확정 트랜잭션 안에서 호출한다.
-
-    반환: (생성기 이름, 세그먼트 요약 목록, 페르소나 dict 목록)
-    생성에 실패하면 ApiError를 던져 확정 전체가 롤백된다.
-    """
+def _generate(audience_context, ages, segments):
     counts = [s["count"] for s in segments]
     try:
-        generator, generated = generators.generate(audience_context, ages, counts)
+        return generators.generate(audience_context, ages, counts)
     except generators.GenerationError as exc:
         raise ApiError(503, "PERSONA_GENERATION_FAILED", f"페르소나를 만들지 못했습니다: {exc}") from exc
 
+
+def infer_segment_profiles(audience_context, ages, segments):
+    """3단계 세그먼트 유형 추론 → TestPlan.segment_profiles 에 그대로 저장하는 모양."""
+    generator, generated = _generate(audience_context, ages, segments)
+    items = [{"id": segment["id"], "name": info["name"], "situation": info.get("situation"),
+              "age_group": info.get("age_group"), "variables": info["variables"], "basis": info.get("basis", []),
+              "avatar": pick_avatar(info.get("age_group"), ages, index)}
+             for index, (segment, info) in enumerate(zip(segments, generated))]
+    return {"generator": generator, "items": items}
+
+
+SPREAD = 8          # 같은 세그먼트 안 개인차 (표준편차). 대표 1명은 세그먼트 기본값 그대로
+LOW, HIGH = 5, 95
+
+
+def individual_variables(base, segment_id, index):
+    """같은 유형 안에서도 사람마다 조금씩 다르게. (세그먼트, 순번)으로 정해져 같은 계획이면 항상 같은 값."""
+    if index == 0:
+        return dict(base)
+    rng = random.Random(f"{segment_id}:{index}")
+    return {k: max(LOW, min(HIGH, round(v + rng.gauss(0, SPREAD)))) for k, v in base.items()}
+
+
+def create_personas(plan_snapshot, audience_context, ages, segments, profiles=None):
+    """plans.services.confirm_plan()이 확정 트랜잭션 안에서 호출한다.
+
+    profiles: 3단계에서 추론해 둔 세그먼트 유형 (infer_segment_profiles). 있으면 다시 만들지 않는다.
+    반환: (생성기 이름, 세그먼트 요약 목록, 페르소나 dict 목록)
+    생성에 실패하면 ApiError를 던져 확정 전체가 롤백된다.
+    """
+    items = {p["id"]: p for p in (profiles or {}).get("items", [])}
+    if profiles and all(s["id"] in items for s in segments):
+        generator, generated = profiles["generator"], [items[s["id"]] for s in segments]
+    else:
+        generator, generated = _generate(audience_context, ages, segments)
+
     rows, summary, number = [], [], 0
     for index, (segment, info) in enumerate(zip(segments, generated)):
-        avatar = pick_avatar(info.get("age_group"), ages, index)
+        avatar = info.get("avatar") or pick_avatar(info.get("age_group"), ages, index)
         first = None
         for i in range(segment["count"]):
             number += 1
@@ -55,7 +88,7 @@ def create_personas(plan_snapshot, audience_context, ages, segments):
             first = first or code
             rows.append(PersonaSnapshot(
                 plan_snapshot=plan_snapshot, code=code, segment_id=segment["id"], segment_name=info["name"],
-                is_representative=(i == 0), variables=info["variables"],
+                is_representative=(i == 0), variables=individual_variables(info["variables"], segment["id"], i),
                 context=persona_context(info["name"], audience_context, ages, info.get("situation"), info.get("age_group")),
                 generator=generator, avatar=avatar,
             ))
