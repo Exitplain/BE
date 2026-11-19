@@ -345,3 +345,14 @@ if _env_bool('DJANGO_CROSS_SITE_COOKIES'):
     CSRF_COOKIE_SAMESITE = 'None'
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+# 서버 로그(gunicorn → journald)에 경고 이상과 처리하지 못한 요청 오류(500 traceback)를 남긴다.
+# 설정이 없으면 DEBUG=False 일 때 django.request 오류가 관리자 메일로만 가서 journalctl 에 아무것도 안 보인다.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'plain': {'format': '%(asctime)s %(levelname)s %(name)s: %(message)s'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'plain'}},
+    'root': {'handlers': ['console'], 'level': os.environ.get('EXITPLAIN_LOG_LEVEL', 'WARNING')},
+    'loggers': {'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False}},
+}
