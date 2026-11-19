@@ -262,7 +262,7 @@ Skyvern 연결은 `GET /api/connections/demo` 조회 후 `/start`, `/checkpoint`
 | Figma 흐름 | 메서드 / 경로 | 요청 핵심 | 성공 응답 핵심 |
 |---|---|---|---|
 | W01 대시보드 | GET `/workspaces/{id}/overview` | 기간 | completed_runs, failed_runs, active_runs, project_loops, recent_issues |
-| C02~C04 프로젝트 | GET/POST `/projects` | name, entry_url | 목록 / 201 project |
+| C02~C04 프로젝트 | GET/POST `/projects` | name, entry_url(선택 — 비우면 새 테스트 1단계에서 `POST /projects/{id}/check` 또는 사이트 확인 요청의 entry_url 로 등록) | 목록 / 201 project |
 | P02 사이트 확인 | POST `/environments/{id}/checks` | environment_revision | 202 check_job_id |
 | P03 기능 탐색 | POST `/projects/{id}/discoveries` | environment_id, checkpoint_id? | 202 job_id |
 | 탐색 조회 | GET `/discoveries/{id}` | 없음 | features, tasks, provenance, blocked_reason |

@@ -18,7 +18,7 @@ from django.utils import timezone
 from common.exceptions import ApiError
 from common.progress import (HEARTBEAT_SECONDS, PROGRESS_LIMIT, STALE_SECONDS, ProgressLog,  # noqa: F401
                              next_seq, run_tracked, start_background)
-from common.projects import project_target
+from common.projects import ensure_entry_url, project_target
 
 from .models import Discovery
 
@@ -89,8 +89,12 @@ def _prepare(project, data):
     """요청 검사. 둘러보기에 필요한 값을 돌려준다 (테스트 계정 값은 메모리에만 둔다)."""
     if data.get("source_snapshot_id"):
         return _prepare_source(project, data)
+    # 주소 없이 만든 프로젝트: 1단계에서 입력한 주소를 프로젝트에 등록하고 이어간다 (없으면 422, 규칙은 A 의 attach_entry_url)
+    just_attached = not project.entry_url
+    if just_attached:
+        ensure_entry_url(project, data.get("entry_url"))
     target = project_target(project)
-    entry_url = data.get("entry_url") or target["entry_url"]
+    entry_url = target["entry_url"] if just_attached else (data.get("entry_url") or target["entry_url"])
     p = urlsplit(entry_url)
     if p.scheme not in {"http", "https"} or p.username or p.password:
         raise ApiError(422, "VALIDATION_ERROR", "http(s)로 시작하는 올바른 URL을 입력해주세요.",

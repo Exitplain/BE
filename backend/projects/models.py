@@ -19,7 +19,8 @@ class Project(models.Model):
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="projects")
     name = models.CharField(max_length=100)
-    entry_url = models.URLField(max_length=500)
+    # 주소 없이 만든 프로젝트는 비어 있다. 새 테스트 1단계에서 주소를 입력하면 그때 채운다 (services.attach_entry_url)
+    entry_url = models.URLField(max_length=500, blank=True, default="")
     allowed_origins = models.JSONField(default=list, blank=True)
     login_mode = models.CharField(max_length=16, choices=LoginMode.choices, default=LoginMode.NONE)
 

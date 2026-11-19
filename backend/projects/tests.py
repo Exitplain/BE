@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -99,12 +100,30 @@ class CreateTests(ProjectApiBase):
         self.assertEqual(res.status_code, 422)
         self.assertEqual(res.json()["error"]["fields"]["entry_url"], ["HTTP 또는 HTTPS로 시작하는 주소를 입력해주세요"])
 
-    def test_missing_fields_are_required_errors(self):
+    def test_only_name_is_required(self):
         res = self.post()
         fields = res.json()["error"]["fields"]
         self.assertEqual(res.status_code, 422)
         self.assertEqual(fields["name"], ["프로젝트 이름을 입력해주세요"])
-        self.assertEqual(fields["entry_url"], ["사이트 URL을 입력해주세요"])
+        self.assertNotIn("entry_url", fields)      # 사이트 URL 은 선택
+
+    def test_url_is_optional(self):
+        """주소를 비우거나(빈 문자열·공백·null) 아예 보내지 않으면 주소 없는 프로젝트가 된다."""
+        for body in [{"name": "아이디어"}, {"name": "아이디어", "entry_url": ""}, {"name": "아이디어", "entry_url": "   "},
+                     {"name": "아이디어", "entry_url": None}]:
+            with self.subTest(body=body):
+                res = self.post(**body)
+                self.assertEqual(res.status_code, 201, res.content)
+                data = res.json()
+                self.assertEqual((data["entry_url"], data["domain"], data["allowed_origins"]), ("", "", []))
+                self.assertEqual(data["check"]["status"], "unchecked")
+        # 주소가 없는 프로젝트끼리는 같은 주소로 겹치지 않는다
+        self.assertEqual(Project.objects.filter(owner=self.user, entry_url="").count(), 4)
+
+    def test_filled_url_is_still_validated(self):
+        res = self.post(name="a", entry_url="banchanroad")
+        self.assertEqual(res.status_code, 422)
+        self.assertEqual(res.json()["error"]["fields"]["entry_url"], ["HTTP 또는 HTTPS로 시작하는 주소를 입력해주세요"])
 
     def test_length_limits_and_unknown_fields(self):
         self.assertEqual(self.post(name="가" * 101, entry_url="https://a.example").status_code, 422)
@@ -386,3 +405,91 @@ class DeleteTests(ProjectApiBase):
         Client().post("/api/v1/collect", _json.dumps({"key": site.key, "sid": "abcd1234", "path": "/"}),
                       content_type="text/plain", HTTP_ORIGIN="https://banchanroad.example")
         self.assertEqual(MeasureHit.objects.count(), 0)
+
+
+
+class NoUrlProjectTests(ProjectApiBase):
+    """주소 없이 만든 프로젝트: 목록·되살리기에 문제가 없고, 새 테스트 1단계에서 주소를 입력하면 프로젝트에 저장된다."""
+
+    def setUp(self):
+        super().setUp()
+        resolver = patch("runs.netguard.resolve_host", return_value=["93.184.216.34"])
+        resolver.start()
+        self.addCleanup(resolver.stop)
+
+    def blank(self, **extra):
+        return self.project(name="아이디어", url="", **extra)
+
+    def check(self, project, body=None):
+        return self.client.post(f"{URL}/{project.pk}/check", body or {}, format="json")
+
+    def reachable(self):
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {}
+        return patch("projects.url_check.requests.get", return_value=response)
+
+    def test_listed_with_empty_domain_and_not_matched_by_url_search(self):
+        self.blank()
+        self.project()
+        items = self.client.get(URL).json()["items"]
+        self.assertEqual(sorted(i["entry_url"] for i in items), ["", "https://banchanroad.example/"])
+        self.assertEqual(next(i for i in items if i["entry_url"] == "")["domain"], "")
+        found = self.client.get(URL, {"q": "banchanroad"}).json()["items"]
+        self.assertEqual([i["name"] for i in found], ["반찬로드"])
+
+    def test_restore_is_never_a_duplicate_for_projects_without_url(self):
+        old = self.blank()
+        self.blank()
+        self.client.delete(f"{URL}/{old.pk}")
+        res = self.client.post(f"{URL}/{old.pk}/restore")
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_check_without_any_url_is_422(self):
+        res = self.check(self.blank())
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (422, "VALIDATION_ERROR"))
+        self.assertEqual(res.json()["error"]["fields"]["entry_url"], ["사이트 URL을 입력해주세요"])
+
+    def test_check_with_url_registers_it_on_the_project_then_checks(self):
+        project = self.blank()
+        with self.reachable():
+            res = self.check(project, {"entry_url": "HTTPS://Shop.Example"})
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["check"]["status"], "ok")
+        project.refresh_from_db()
+        self.assertEqual((project.entry_url, project.allowed_origins),
+                         ("https://shop.example/", ["https://shop.example"]))
+
+    def test_existing_url_is_never_replaced_by_the_body(self):
+        project = self.project()
+        with self.reachable():
+            res = self.check(project, {"entry_url": "https://other.example/"})
+        self.assertEqual(res.status_code, 200, res.content)
+        project.refresh_from_db()
+        self.assertEqual(project.entry_url, "https://banchanroad.example/")
+
+    def test_registering_applies_the_same_rules_as_creating(self):
+        project = self.blank()
+        self.project(url="https://taken.example/")
+        res = self.check(project, {"entry_url": "https://TAKEN.example"})
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (409, "DUPLICATE_PROJECT"))
+        res = self.check(project, {"entry_url": "banchanroad"})
+        self.assertEqual(res.status_code, 422)
+        self.assertEqual(res.json()["error"]["fields"]["entry_url"], ["HTTP 또는 HTTPS로 시작하는 주소를 입력해주세요"])
+        self.assertEqual(self.check(project, {"entry_url": 123}).status_code, 422)
+        project.refresh_from_db()
+        self.assertEqual((project.entry_url, project.allowed_origins), ("", []))   # 실패하면 비어 있는 채로
+
+    def test_internal_address_is_refused_when_registering(self):
+        project = self.blank()
+        with patch("runs.netguard.resolve_host", return_value=["10.0.0.5"]):
+            res = self.check(project, {"entry_url": "http://intranet.example/"})
+        self.assertEqual((res.status_code, res.json()["error"]["code"]), (422, "TARGET_NOT_ALLOWED"))
+        project.refresh_from_db()
+        self.assertEqual(project.entry_url, "")
+
+    def test_other_users_project_is_still_403(self):
+        theirs = self.project(owner=self.other, name="남의 것", url="")
+        self.assertEqual(self.check(theirs, {"entry_url": "https://shop.example/"}).status_code, 403)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.entry_url, "")

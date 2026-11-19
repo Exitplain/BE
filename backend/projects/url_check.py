@@ -10,7 +10,10 @@ from urllib.parse import urljoin
 import requests
 from django.utils import timezone
 
+from common.exceptions import validation_error
+
 from .models import Project
+from .services import URL_REQUIRED
 
 CONNECT_TIMEOUT = 3
 READ_TIMEOUT = 5
@@ -74,6 +77,8 @@ def _fetch(url):
 
 def check_project_url(project):
     """프로젝트 입구 주소를 확인하고 결과를 저장해 응답용 dict 로 돌려준다."""
+    if not project.entry_url:   # 주소 없이 만든 프로젝트: 먼저 주소를 입력해야 한다 (본문 entry_url 로 등록)
+        raise validation_error("entry_url", URL_REQUIRED)
     started = time.monotonic()
     reason = message = None
     try:

@@ -14,7 +14,7 @@ from .serializers import ProjectCreateSerializer, ProjectListQuerySerializer
 
 class ProjectListCreateView(BaseAPIView):
     """GET  /api/v1/projects?q=&archived=&limit=&cursor=  — C02 프로젝트 찾기 (내 프로젝트만, 수정일 최신순)
-    POST /api/v1/projects {name, entry_url, journey_note?} — C03~C04 새 프로젝트
+    POST /api/v1/projects {name, entry_url?, journey_note?} — C03~C04 새 프로젝트 (사이트 URL 은 선택)
     """
 
     def get(self, request):
@@ -67,11 +67,20 @@ class SampleProjectListView(BaseAPIView):
 
 
 class ProjectCheckView(BaseAPIView):
-    """POST /api/v1/projects/{id}/check — 5.0 URL 확인 (허용 대상인지, 접속되는지).
+    """POST /api/v1/projects/{id}/check {entry_url?} — 5.0 URL 확인 (허용 대상인지, 접속되는지).
 
     확인 결과가 접속 불가여도 요청 자체는 성공이므로 200 이다. 결과는 프로젝트에 저장된다.
+    주소 없이 만든 프로젝트는 본문의 entry_url 을 먼저 프로젝트에 등록한 뒤 확인한다 (이미 주소가 있으면 본문은 무시).
+    주소도 본문도 없으면 422(entry_url 필수).
     """
 
     def post(self, request, project_id):
         project = get_owned_project(request.user, project_id)
+        body = request.data if isinstance(request.data, dict) else {}
+        entry_url = body.get("entry_url")
+        if entry_url is not None and not isinstance(entry_url, str):
+            raise ApiError(422, "VALIDATION_ERROR", "사이트 URL은 문자열이어야 합니다.",
+                           {"entry_url": ["사이트 URL은 문자열이어야 합니다."]})
+        if not project.entry_url and entry_url:
+            services.attach_entry_url(project, entry_url)
         return Response({"project_id": project.pk, "check": url_check.check_project_url(project)})
