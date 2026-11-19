@@ -135,6 +135,7 @@ def status_dict(request, project, site):
         "installed": False, "last_received_at": None, "last_origin": None,
         "sessions_24h": 0, "events_24h": 0,
         "mapping_saved_at": None,          # R05 매핑을 한 번이라도 저장했으면 실측 퍼널·비교 화면으로 간다
+        "imports": {"count": 0, "sessions": 0, "last_at": None},   # CSV 로 올린 로그 (csv_import.py)
     }
     if not out["available"]:
         out["reason"] = "NOT_DEPLOYED"
@@ -152,6 +153,10 @@ def status_dict(request, project, site):
         "events_24h": recent.count(),
         "mapping_saved_at": site.mapping_saved_at.isoformat() if site.mapping_saved_at else None,
     })
+    imports = list(site.imports.order_by("-created_at").values_list("sessions", "created_at"))
+    if imports:
+        out["imports"] = {"count": len(imports), "sessions": sum(n for n, _ in imports),
+                          "last_at": imports[0][1].isoformat()}
     return out
 
 
@@ -173,6 +178,11 @@ def steps(site, days):
 # ---------- R05 단계 매핑: 실측 경로(단계 ID) → 사전 테스트(예측) 실행 퍼널 단계 ----------
 
 MAPPING_DAYS = 7
+IMPORT_MAPPING_DAYS = 30   # CSV 로 올린 로그는 지난 기록이라 매핑 후보를 30일에서 찾는다
+
+
+def mapping_days(site):
+    return IMPORT_MAPPING_DAYS if site.imports.exists() else MAPPING_DAYS
 
 
 def latest_report(project):
@@ -232,7 +242,8 @@ def mapping_dict(project, site, report=None):
     report = report or latest_report(project)
     stages = prediction_stages(report)
     stage_ids = [s["id"] for s in stages]
-    counts = {r["step_id"]: r for r in steps(site, MAPPING_DAYS)["items"]}
+    days = mapping_days(site)
+    counts = {r["step_id"]: r for r in steps(site, days)["items"]}
     saved = site.mapping or {}
     rows = []
     for step_id in list(counts) + [k for k in saved if k not in counts]:
@@ -244,7 +255,7 @@ def mapping_dict(project, site, report=None):
         rows.append({"step_id": step_id, "sessions": counts.get(step_id, {}).get("sessions", 0),
                      "events": counts.get(step_id, {}).get("events", 0),
                      "stage_id": stage_id, "suggested_stage_id": suggested, "suggestion": why, "saved": has_saved})
-    out = {"project_id": project.pk, "days": MAPPING_DAYS,
+    out = {"project_id": project.pk, "days": days,
            "report_id": str(report.id) if report else None, "stages": stages, "rows": rows,
            "mapped": sum(1 for r in rows if r["stage_id"]), "saved_at": site.mapping_saved_at.isoformat()
            if site.mapping_saved_at else None}

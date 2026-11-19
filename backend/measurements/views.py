@@ -3,13 +3,14 @@ from pathlib import Path
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from common.exceptions import ApiError
 from common.projects import get_owned_project
 from common.views import BaseAPIView
 
-from . import services
+from . import csv_import, services
 
 SCRIPT = (Path(__file__).with_name("e.js")).read_text(encoding="utf-8")
 
@@ -108,3 +109,44 @@ class MeasurementFunnelView(BaseAPIView):
             raise ApiError(422, "VALIDATION_ERROR", "device 는 all, mobile, desktop 중 하나입니다.",
                            {"device": ["all, mobile, desktop"]})
         return Response(services.funnel_dict(project, site, int(days), device))
+
+
+class MeasurementImportsView(BaseAPIView):
+    """GET·POST /api/v1/projects/{id}/measurement/imports — 스크립트를 못 심는 사이트의 CSV 로그 올리기
+
+    POST multipart file=<CSV> (5MB·10만 줄까지). 키가 없으면 함께 발급한다 (배포 주소가 없어도 된다).
+    형식은 measurements/csv_import.py 와 GET .../measurement/csv-template 의 예시 파일.
+    """
+    parser_classes = [JSONParser, MultiPartParser]
+
+    def get(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        site = services.site_for(project)
+        return Response({"project_id": project.pk, "items": csv_import.list_imports(site) if site else []})
+
+    def post(self, request, project_id):
+        project = get_owned_project(request.user, project_id)
+        site = services.site_for(project, create=True)
+        return Response(csv_import.import_csv(site, request.user, request.FILES.get("file")), status=201)
+
+
+class MeasurementImportDetailView(BaseAPIView):
+    """DELETE /api/v1/projects/{id}/measurement/imports/{import_id} — 올린 CSV 와 그 줄들을 지운다 (204)"""
+
+    def delete(self, request, project_id, import_id):
+        project = get_owned_project(request.user, project_id)
+        site = services.site_for(project)
+        if site is None:
+            raise ApiError(404, "NOT_FOUND", "올린 파일을 찾을 수 없어요.")
+        csv_import.delete_import(site, import_id)
+        return Response(status=204)
+
+
+class MeasurementCsvTemplateView(BaseAPIView):
+    """GET /api/v1/projects/{id}/measurement/csv-template — 머리글과 예시 줄이 든 CSV 파일"""
+
+    def get(self, request, project_id):
+        get_owned_project(request.user, project_id)
+        res = HttpResponse(csv_import.template_csv(), content_type="text/csv; charset=utf-8")
+        res["Content-Disposition"] = 'attachment; filename="exitplain-measurement-template.csv"'
+        return res
