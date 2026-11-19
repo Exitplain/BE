@@ -82,7 +82,7 @@ async def test_runtime_uses_persona_values_viewport_and_stage(tmp_path):
     # 이탈 순간의 근거와 사람이 읽는 한 줄 (어느 화면 · 주 원인 · 불만 점수)
     dropout = status["default"]["issues"][0]["dropout"]
     assert dropout["score"] >= dropout["threshold"] and dropout["path"].startswith("/")
-    assert "이탈" in status["default"]["explanation"] and "주 원인" in status["default"]["explanation"]
+    assert "그만뒀어요" in status["default"]["explanation"] and "입력할 칸이" in status["default"]["explanation"]
     assert status["calm"]["explanation"]
     assert status["calm"]["status"] != "simulated_dropout"
     observed = [e for e in events if e["type"] == "observation.created"]
