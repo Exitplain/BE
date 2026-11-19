@@ -88,15 +88,28 @@ def _decode_cursor(cursor):
 
 
 def _with_last_pretest(queryset):
-    """프로젝트마다 가장 최근 사전 테스트(Run) 요약을 한 번의 쿼리에 붙인다."""
+    """프로젝트마다 가장 최근 사전 테스트(Run) 요약과 실측·보정 상태를 한 번의 쿼리에 붙인다.
+
+    calibrations·measurements 는 projects 를 참조하는 쪽이라, runs 와 같은 이유로 import 하지 않고
+    apps.get_model 로 호출 시점에만 가져온다.
+    """
     Run = _run_model()
     latest = Run.objects.filter(project=OuterRef("pk"), kind="pretest").order_by("-sequence_no")
+    revision = apps.get_model("calibrations", "CalibrationRevision").objects.filter(
+        project=OuterRef("pk")).order_by("-revision")
+    site = apps.get_model("measurements", "MeasureSite").objects.filter(project=OuterRef("pk"))
     return queryset.annotate(
         lp_id=Subquery(latest.values("id")[:1]),
         lp_no=Subquery(latest.values("sequence_no")[:1]),
         lp_status=Subquery(latest.values("status")[:1]),
         lp_created=Subquery(latest.values("created_at")[:1]),
         lp_finished=Subquery(latest.values("finished_at")[:1]),
+        cal_rev=Subquery(revision.values("revision")[:1]),
+        cal_restored=Subquery(revision.values("restored_from")[:1]),
+        cal_at=Subquery(revision.values("created_at")[:1]),
+        cal_basis=Subquery(revision.values("basis")[:1]),
+        ms_id=Subquery(site.values("id")[:1]),
+        ms_last=Subquery(site.values("last_received_at")[:1]),
     )
 
 
@@ -111,15 +124,44 @@ def _last_pretest(project):
             "created_at": _iso(project.lp_created), "finished_at": _iso(project.lp_finished)}
 
 
+def _calibration(project):
+    """가장 최근 보정 리비전. 없거나 기본 모형으로 되돌렸으면(restored_from=0) 보정 전이다.
+
+    mean_error_pp 는 보정을 만들 때 기준으로 삼은 실측 대비 평균 오차(%p)다. 사람 관측만으로 만들었거나
+    예전 값으로 되돌린 리비전은 기준 오차가 없어서 None 이다.
+    """
+    rev = getattr(project, "cal_rev", None)
+    if rev is None or getattr(project, "cal_restored", None) == 0:
+        return {"status": "before", "revision": None, "applied_at": None, "mean_error_pp": None}
+    basis = project.cal_basis
+    if isinstance(basis, str):          # 일부 DB 는 JSON 하위 쿼리를 문자열로 돌려준다
+        try:
+            basis = json.loads(basis)
+        except ValueError:
+            basis = None
+    mean_error = basis.get("mean_error") if isinstance(basis, dict) else None
+    return {"status": "applied", "revision": rev, "applied_at": _iso(project.cal_at),
+            "mean_error_pp": mean_error if isinstance(mean_error, (int, float)) else None}
+
+
+def _measurement(project):
+    """실측 연결 상태. 수집 키가 없으면 미연결, 키는 있는데 아직 받은 기록이 없으면 대기, 받았으면 연결됨."""
+    if getattr(project, "ms_id", None) is None:
+        return {"status": "unconnected", "last_received_at": None}
+    last = project.ms_last
+    return {"status": "connected" if last else "waiting", "last_received_at": _iso(last)}
+
+
 def _domain(url):
     return urlsplit(url).netloc
 
 
 def project_summary(project):
-    """목록(C02)의 한 줄. 실측·보정 열은 컷 범위라 넣지 않는다."""
+    """목록(C02)의 한 줄. 대시보드의 실측·보정 열도 여기서 함께 내려준다."""
     return {"id": project.pk, "name": project.name, "entry_url": project.entry_url, "domain": _domain(project.entry_url),
             "is_sample": project.is_sample, "archived_at": _iso(project.archived_at),
-            "last_pretest": _last_pretest(project), "updated_at": project.updated_at.isoformat()}
+            "last_pretest": _last_pretest(project), "measurement": _measurement(project),
+            "calibration": _calibration(project), "updated_at": project.updated_at.isoformat()}
 
 
 def list_projects(user, *, q="", archived=False, limit=20, cursor=""):
@@ -151,5 +193,6 @@ def project_detail(project):
         "check": {"status": project.check_status, "http_status": project.check_http, "elapsed_ms": project.check_ms,
                   "checked_at": _iso(project.check_checked_at)},
         "runs": {"total": counts["total"], "active": counts["active"], "last_pretest": _last_pretest(annotated)},
+        "measurement": _measurement(annotated), "calibration": _calibration(annotated),
         "created_at": project.created_at.isoformat(), "updated_at": project.updated_at.isoformat(),
     }

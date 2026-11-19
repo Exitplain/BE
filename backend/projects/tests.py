@@ -257,3 +257,79 @@ class DetailTests(ProjectApiBase):
         project = self.project(archived_at=timezone.now())
         body = self.client.get(f"{URL}/{project.pk}").json()
         self.assertIsNotNone(body["archived_at"])
+
+
+
+class LoopStatusTests(ProjectApiBase):
+    """대시보드의 실측·보정 열: 목록과 개요 모두 같은 값을 내려준다."""
+
+    def revise(self, project, revision, *, basis=None, restored_from=None):
+        from calibrations.models import CalibrationRevision
+        return CalibrationRevision.objects.create(project=project, revision=revision, params={"segments": {}},
+                                                  basis=basis or {}, restored_from=restored_from,
+                                                  created_by=self.user)
+
+    def loops(self, project):
+        item = self.client.get(URL).json()["items"][0]
+        detail = self.client.get(f"{URL}/{project.pk}").json()
+        self.assertEqual((item["measurement"], item["calibration"]),
+                         (detail["measurement"], detail["calibration"]))
+        return item["measurement"], item["calibration"]
+
+    def test_new_project_is_unconnected_and_before_calibration(self):
+        project = self.project()
+        measurement, calibration = self.loops(project)
+        self.assertEqual(measurement, {"status": "unconnected", "last_received_at": None})
+        self.assertEqual(calibration, {"status": "before", "revision": None, "applied_at": None,
+                                       "mean_error_pp": None})
+
+    def test_latest_revision_is_applied_with_its_basis_error(self):
+        project = self.project()
+        self.revise(project, 1, basis={"mean_error": 70.0})
+        latest = self.revise(project, 2, basis={"mean_error": 62.5, "days": 7})
+        _, calibration = self.loops(project)
+        self.assertEqual(calibration, {"status": "applied", "revision": 2,
+                                       "applied_at": latest.created_at.isoformat(), "mean_error_pp": 62.5})
+
+    def test_reset_to_default_model_counts_as_before(self):
+        project = self.project()
+        self.revise(project, 1, basis={"mean_error": 62.5})
+        self.revise(project, 2, restored_from=0)
+        self.assertEqual(self.loops(project)[1]["status"], "before")
+
+    def test_restored_revision_is_applied_without_error_value(self):
+        project = self.project()
+        self.revise(project, 1, basis={"mean_error": 62.5})
+        self.revise(project, 2, restored_from=1)
+        _, calibration = self.loops(project)
+        self.assertEqual((calibration["status"], calibration["revision"], calibration["mean_error_pp"]),
+                         ("applied", 2, None))
+
+    def test_measurement_waits_until_first_hit_then_connected(self):
+        from measurements.models import MeasureSite
+        project = self.project()
+        site = MeasureSite.objects.create(project=project)
+        self.assertEqual(self.loops(project)[0], {"status": "waiting", "last_received_at": None})
+        received = timezone.now()
+        MeasureSite.objects.filter(pk=site.pk).update(last_received_at=received)
+        self.assertEqual(self.loops(project)[0], {"status": "connected", "last_received_at": received.isoformat()})
+
+    def test_list_adds_no_query_per_project(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def list_queries():
+            self.client.get(URL)                       # 세션 갱신 같은 첫 요청 쿼리를 빼고 잰다
+            with CaptureQueriesContext(connection) as captured:
+                items = self.client.get(URL).json()["items"]
+            return len(captured), items
+
+        project = self.project(name="p0", url="https://p0.example/")
+        self.revise(project, 1, basis={"mean_error": 10.0})
+        one, _ = list_queries()
+        for i in (1, 2):
+            project = self.project(name=f"p{i}", url=f"https://p{i}.example/")
+            self.revise(project, 1, basis={"mean_error": 10.0 + i})
+        three, items = list_queries()
+        self.assertEqual(one, three)                   # 프로젝트가 늘어도 쿼리 수는 같다
+        self.assertEqual(sorted(p["calibration"]["mean_error_pp"] for p in items), [10.0, 11.0, 12.0])
