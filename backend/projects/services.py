@@ -147,6 +147,7 @@ def _with_last_pretest(queryset):
         ms_id=Subquery(site.values("id")[:1]),
         ms_last=Subquery(site.values("last_received_at")[:1]),
         ms_import=Subquery(imports.values("created_at")[:1]),
+        ms_mapping=Subquery(site.values("mapping_saved_at")[:1]),
     )
 
 
@@ -187,10 +188,11 @@ def _measurement(project):
     스크립트를 못 넣어 CSV 로 올린 기록이 있어도 연결됨으로 본다 (last_imported_at 은 마지막으로 올린 시각).
     """
     if getattr(project, "ms_id", None) is None:
-        return {"status": "unconnected", "last_received_at": None, "last_imported_at": None}
+        return {"status": "unconnected", "last_received_at": None, "last_imported_at": None, "mapping_saved_at": None}
     last, imported = project.ms_last, getattr(project, "ms_import", None)
     return {"status": "connected" if last or imported else "waiting", "last_received_at": _iso(last),
-            "last_imported_at": _iso(imported)}
+            "last_imported_at": _iso(imported),
+            "mapping_saved_at": _iso(getattr(project, "ms_mapping", None))}    # 단계 매핑을 저장했으면 비교 가능
 
 
 def _domain(url):
