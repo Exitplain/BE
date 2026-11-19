@@ -1,7 +1,7 @@
 """3단계 세그먼트 유형 추론 → 확정 때 그대로 쓰고, 같은 유형 안 사람마다 능력치를 조금씩 다르게."""
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from common.testing import WizardMixin, fake_discovery
 from personas import generators
@@ -69,3 +69,15 @@ class SegmentInferenceTests(WizardMixin, TestCase):
         base = {"patience": 50, "digital_literacy": 50, "price_sensitivity": 50, "trust_need": 50}
         self.assertEqual(individual_variables(base, "segment_2", 3), individual_variables(base, "segment_2", 3))
         self.assertEqual(individual_variables(base, "segment_2", 0), base)
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class SegmentInferenceOutsideTransactionTests(WizardMixin, TransactionTestCase):
+    """운영처럼 요청이 트랜잭션 밖에서 돌 때도 된다 (TestCase 는 테스트를 트랜잭션으로 감싸 이 오류를 숨긴다)."""
+
+    def test_inference_works_without_an_outer_transaction(self, _):
+        plan = self.ready_plan()
+        res = self.client.post(f"/api/v1/plans/{plan['id']}/segment-inferences", {"revision": plan["revision"]},
+                               format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(all(s["name"] for s in res.json()["segment_profiles"]))
