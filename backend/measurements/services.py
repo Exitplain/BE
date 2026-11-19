@@ -183,11 +183,26 @@ def latest_report(project):
             .order_by("-created_at", "-revision").first())
 
 
+def agent_screens(task):
+    """과업에서 에이전트가 도달한 모든 화면 (screens_all). 예전 리포트는 퍼널 단계(stages)만 있다.
+
+    리포트 퍼널은 세션 20% 이상이 도달한 화면만 남겨서, 대부분 일찍 이탈하면 뒤 화면이 빠진다.
+    실측 매핑·비교에서는 그 화면들이 오히려 중요하므로 전체를 쓴다 (이름은 퍼널 단계 이름이 있으면 그것).
+    """
+    funnel = task.get("journey_funnel") or {}
+    stages = funnel.get("stages") or []
+    screens = funnel.get("screens_all")
+    if not screens:
+        return stages
+    names = {s["path"]: s["name"] for s in stages}
+    return [{**s, "name": names.get(s["path"], s["name"])} for s in screens]
+
+
 def prediction_stages(report):
-    """리포트의 과업별 실행 퍼널 단계를 하나로 모은다. 같은 화면 경로는 한 단계 (과업 이름을 함께 남긴다)."""
+    """리포트의 과업별 에이전트 도달 화면을 하나로 모은다. 같은 화면 경로는 한 단계 (과업 이름을 함께 남긴다)."""
     stages, seen = [], {}
     for task in (report.data.get("tasks") or []) if report else []:
-        for stage in (task.get("journey_funnel") or {}).get("stages", []):
+        for stage in agent_screens(task):
             sid = stage["path"]
             if sid not in seen:
                 seen[sid] = {"id": sid, "name": stage.get("name") or sid, "is_goal": bool(stage.get("is_goal")),
@@ -307,7 +322,7 @@ def _max_drop(stages, key):
 def _task_compare(task, by_stage):
     funnel = task.get("journey_funnel") or {}
     valid = funnel.get("valid_sessions") or 0
-    stages = funnel.get("stages") or []
+    stages = agent_screens(task)
     # 퍼널은 첫 단계를 거친 세션만 센다. 검색·광고로 중간 화면에 바로 들어온 세션은 mid_entry 로 따로 둔다
     # (섞으면 도달률이 100%를 넘고 오차·차이 구간이 틀어진다)
     entered = by_stage.get(stages[0]["path"], set()) if stages else set()

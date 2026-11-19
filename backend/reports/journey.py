@@ -85,6 +85,14 @@ def journey_funnel(rows, *, success_path=None, seeds=1):
     best_title = {k: short[t] for k, t in best_title.items()}
     shared = {t for t, n in Counter(best_title.values()).items() if n > 1}
     names = {k: best_title[k] if best_title.get(k) and best_title[k] not in shared else k for k in stages}
+    # 에이전트가 한 번이라도 도달한 모든 화면 (실측 매핑·예측 비교·보정용). 리포트 퍼널(stages)은 20% 이상만 남기지만,
+    # 거의 도달하지 못한 화면도 "예측 도달이 낮다"는 정보라 실측과 비교할 때 빠지면 안 된다.
+    every = sorted(counts, key=lambda k: (k == goal, median(positions[k]), -counts[k], k))
+    every_title = {k: titles[k].most_common(1)[0][0] for k in every if titles[k]}
+    every_short = _strip_site_name(set(every_title.values()))
+    every_names = {k: names.get(k) or every_short.get(every_title.get(k), "") or k for k in every}
+    screens_all = [{"id": k, "path": k, "name": every_names[k], "reached": counts[k], "order": i,
+                    "in_funnel": k in main, "is_goal": k == goal} for i, k in enumerate(every)]
     texts = {}                                          # 단계마다 화면 글자 예시 하나 (역할 이름 붙이기용, 보고서에는 안 남김)
     for row in rows:
         for screen in row["screens"]:
@@ -119,6 +127,7 @@ def journey_funnel(rows, *, success_path=None, seeds=1):
         "basis": "observed_screens",
         "valid_sessions": valid,
         "stages": funnel,
+        "screens_all": screens_all,
         "_screen_texts": texts,             # 저장 전에 reports/stage_names.py 가 쓰고 지운다
         "other": {"screens": len(set(counts) - main), "dropouts": dropouts_at[OTHER]},
         "heatmap": {"stages": columns,
