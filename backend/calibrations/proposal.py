@@ -108,7 +108,7 @@ class _Collector:
             out.append({
                 "key": f"{segment_id}.{kind}" + (f".{cause}" if cause else ""),
                 "segment_id": segment_id, "segment_name": name, "kind": kind, "cause": cause,
-                "label": LABEL_THRESHOLD if kind == "threshold" else f"마찰 가중치 · {CAUSES[cause]}",
+                "label": LABEL_THRESHOLD if kind == "threshold" else f"불편한 점 가중치 · {CAUSES[cause]}",
                 "current": cal.snap(now), "proposed": proposed, "reason": " · ".join(dict.fromkeys(why)),
             })
         return out
@@ -128,11 +128,11 @@ def _from_measurement(report, funnel, collector):
         if heat:
             segment_id, (segment_name, _) = (min if more else max)(heat.items(), key=lambda item: (item[1][1], item[0]))
             collector.bump(segment_id, segment_name, "threshold", None, k, not more,
-                           f"{where}: 실측 이탈이 예측보다 {'커요' if more else '작아요'} ({stage['error']:+.1f}%p)")
+                           f"{where}: 실제 고객 데이터 이탈이 예측보다 {'커요' if more else '작아요'} ({stage['error']:+.1f}%p)")
         cause = _top_cause(report, screens, task["task_id"], stage["id"])
         if cause:
             collector.bump("*", "전체", "weight", cause, k, more,
-                           f"{where} 화면에서 가장 많이 겪은 마찰이 {CAUSES[cause]}이에요")
+                           f"{where} 화면에서 가장 많이 겪은 불편한 점이 {CAUSES[cause]}이에요")
     errors = [t["mean_error"] for t in tasks if t["mean_error"] is not None]
     return {
         # 근거 수는 비교 단계가 아직 없어도 첫 단계에 온 실측 세션으로 센다
@@ -171,7 +171,7 @@ def _from_observations(project, collector):
             cause = max(sorted(set(known)), key=known.count)
             where = f"{task['name']} · {names.get(screen, screen)}"
             collector.bump("*", "전체", "weight", cause, HUMAN_K, True,
-                           f"{where}: 참여자 {len(mine)}명 중 {len(reasons)}명이 가장 불편했다고 골랐는데 모델 마찰은 낮아요"
+                           f"{where}: 참여자 {len(mine)}명 중 {len(reasons)}명이 가장 불편했다고 골랐는데 모델이 본 불편한 점은 낮아요"
                            f" (이유: {CAUSES[cause]})")
             picks.append({"task_id": task_id, "task_name": task["name"], "stage_id": screen,
                           "stage_name": names.get(screen, screen), "share": round(share * 100, 1)})
@@ -182,7 +182,7 @@ def _from_observations(project, collector):
                 cause = model_causes[0]
                 where = f"{task['name']} · {names.get(screen, screen)}"
                 collector.bump("*", "전체", "weight", cause, HUMAN_K, False,
-                               f"{where}: 모델은 마찰이 크다고 봤는데 참여자 {len(mine)}명 중 거의 고르지 않았어요")
+                               f"{where}: 모델은 불편한 점이 크다고 봤는데 참여자 {len(mine)}명 중 거의 고르지 않았어요")
     return {"evidence": "observations", "count": max(counts.values(), default=0), "mean_error": None,
             "gaps": [], "picks": picks}
 
@@ -197,7 +197,7 @@ def build(project, days=7, strength="normal"):
     collector = _Collector(STRENGTHS.get(strength, 1.0))
     out = {"project_id": project.pk, "base_revision": revision, "days": days, "strength": strength,
            "min_evidence": MIN_EVIDENCE, "provisional": False, "basis": None, "items": [],
-           "after_error": None, "after_note": "보정 후 오차는 다음 사전 테스트가 끝난 뒤 실제 결과로 보여 줘요."}
+           "after_error": None, "after_note": "예측 맞추기 후 오차는 다음 사전 테스트가 끝난 뒤 실제 결과로 보여 줘요."}
     report = measure.latest_report(project)
     if report is None:
         return {**out, "available": False, "reason": "NO_PREDICTION",
@@ -205,7 +205,7 @@ def build(project, days=7, strength="normal"):
     used = report.run.config.get("calibration_revision", 0) if report.run_id else 0
     if _params_of(project, used) != _normalized(params):
         return {**out, "available": False, "reason": "WAITING_NEXT_RUN",
-                "message": "보정을 적용한 뒤 아직 새 사전 테스트가 없어요. 다음 사전 테스트가 끝나면 다시 비교해요."}
+                "message": "예측 맞추기를 적용한 뒤 아직 새 사전 테스트가 없어요. 다음 사전 테스트가 끝나면 다시 비교해요."}
 
     site = measure.site_for(project)
     measured = None
@@ -224,8 +224,8 @@ def build(project, days=7, strength="normal"):
     if total == 0:
         reason = "NOT_CONNECTED" if site is None else "NOT_MAPPED" if not site.mapping_saved_at else "NO_EVIDENCE"
         return {**out, "available": False, "reason": reason,
-                "message": "실측을 연결하거나, 참여자 응답 링크로 사람 관측을 모아 주세요. "
-                           f"실측 세션과 사람 관측을 합쳐 {MIN_EVIDENCE}건부터 실제 조정안을 만들어요."}
+                "message": "실제 고객 데이터를 연결하거나, 참여자 응답 링크로 사람 관측을 모아 주세요. "
+                           f"실제 고객 데이터 방문과 사람 관측을 합쳐 {MIN_EVIDENCE}건부터 실제 조정안을 만들어요."}
     merged = _Collector(collector.strength)
     for part in ([measured[1]] if m_count else []) + ([observed] if h_count else []):
         for key, factor in part.factors.items():
@@ -245,7 +245,7 @@ def build(project, days=7, strength="normal"):
         "report_id": str(report.id), "run_sequence": report.run.sequence_no if report.run_id else None,
         "days": days, "device": "all", **basis})
     if not enough:
-        parts = " + ".join(x for x in (f"실측 {m_count}세션" if m_count else "",
+        parts = " + ".join(x for x in (f"실제 고객 데이터 {m_count}회 방문" if m_count else "",
                                        f"사람 관측 {h_count}명" if h_count else "") if x)
         out["message"] = (f"지금은 {parts}(합 {total}건)이라 임시값이에요. "
                           f"합쳐서 {MIN_EVIDENCE}건부터 실제 값으로 바뀌고 적용할 수 있어요.")

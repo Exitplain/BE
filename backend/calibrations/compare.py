@@ -37,14 +37,14 @@ def compare(project, rev):
     site = measure.site_for(project)
     before_report = ReportSnapshot.objects.filter(pk=basis.get("report_id")).first() if basis.get("report_id") else None
     if site is None or before_report is None or rev.restored_from is not None:
-        out["message"] = "조정안으로 적용한 보정만 전·후를 비교해요."
+        out["message"] = "조정안으로 적용한 예측 맞추기만 전·후를 비교해요."
         return out
     days = basis.get("days", 7)
     before = _summary(measure.funnel_dict(project, site, days, "all", report=before_report))
     out["before"] = {"report_id": str(before_report.id), **{k: v for k, v in before.items() if k != "stages"}}
     after_report = _after_report(project, rev.revision)
     if after_report is None:
-        out.update(status="waiting", message="이 보정으로 돈 사전 테스트가 아직 없어요. 끝나면 같은 실측 기간으로 비교해요.")
+        out.update(status="waiting", message="이 예측 맞추기로 돈 사전 테스트가 아직 없어요. 끝나면 같은 실제 고객 데이터 기간으로 비교해요.")
         out["stages"] = [{**s, "after": None, "change": None} for s in before["stages"]]
         return out
     after = _summary(measure.funnel_dict(project, site, days, "all", report=after_report))

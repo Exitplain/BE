@@ -164,7 +164,7 @@ class Worker:
             proc = subprocess.Popen(command, cwd=repo_root(), stdout=log, stderr=subprocess.STDOUT, env=env, **popen_args)
         except OSError as exc:
             log.close()
-            importer.finalize_task_run(task_run, error_code="SPAWN_FAILED", error_message=f"에이전트를 시작하지 못했습니다: {exc}")
+            importer.finalize_task_run(task_run, error_code="SPAWN_FAILED", error_message=f"AI 고객을 시작하지 못했습니다: {exc}")
             return None
         data = task_run.input_json
         waves = math.ceil(len(data.get("personas", [])) / max(1, int(data.get("concurrency", 1))))
@@ -187,7 +187,7 @@ class Worker:
         if returncode is None and time.monotonic() > job.deadline:
             terminate_tree(job.proc)
             returncode = job.proc.returncode
-            job.error_code, job.error_message = "TIMEOUT", "에이전트가 제한 시간 안에 끝나지 않아 중단했습니다."
+            job.error_code, job.error_message = "TIMEOUT", "AI 고객이 제한 시간 안에 끝나지 않아 중단했습니다."
         if returncode is None:
             return False
         self._close(job)

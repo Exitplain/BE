@@ -60,7 +60,7 @@ def create(project, user, body):
         raise ApiError(422, "VALIDATION_ERROR", "과업을 골라 주세요.", {"task_id": ["과업"]})
     purpose = body.get("purpose") or HumanObservation.Purpose.CALIBRATION
     if purpose not in HumanObservation.Purpose.values:
-        raise ApiError(422, "VALIDATION_ERROR", "보정용 또는 평가용을 골라 주세요.", {"purpose": ["용도"]})
+        raise ApiError(422, "VALIDATION_ERROR", "예측 맞추기용 또는 평가용을 골라 주세요.", {"purpose": ["용도"]})
     days = body.get("days", DEFAULT_DAYS)
     limit = body.get("max_responses", 50)
     if not _int_in(days, 1, MAX_DAYS):

@@ -106,4 +106,4 @@ class ExploreLoginTests(WizardMixin, TestCase):
         importer._apply(batch, {"type": "login.completed", "event_id": "e2", "session_id": sid, "sequence": 2,
                                 "occurred_at": "2026-11-17T00:00:01+00:00", "payload": {"ok": False, "has_account": True}})
         second = TestAccount.objects.get(position=2)
-        self.assertEqual((second.status, second.status_message), ("failed", "에이전트 로그인 실패"))
+        self.assertEqual((second.status, second.status_message), ("failed", "AI 고객 로그인 실패"))

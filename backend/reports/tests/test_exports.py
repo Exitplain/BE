@@ -48,7 +48,7 @@ class ExportTests(WizardMixin, TestCase):
         text = res.content.decode("utf-8")
         self.assertIn("# Exitplain 진단 리포트", text)
         self.assertIn("| 달성률 | 89.5% |", text)                       # 17 / (17 + 2), 기술 실패 1건 제외
-        self.assertIn("### 퍼널 (실제로 지나간 화면)", text)             # 실행 퍼널(journey_funnel)로 내보냄
+        self.assertIn("### 단계별 이동 (실제로 지나간 화면)", text)             # 실행 퍼널(journey_funnel)로 내보냄
         self.assertIn("| /signup | 19 | 19 | 100.0% | 2 |", text)
         self.assertNotIn("| 탐색 |", text)                               # 지나가지 않은 7단계 '탐색' 0명 줄이 없음
         self.assertIn("1. 입력 부담: 이탈 2명 (100.0%)", text)

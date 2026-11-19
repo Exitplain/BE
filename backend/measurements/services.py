@@ -136,7 +136,7 @@ def status_dict(request, project, site):
     }
     if not out["available"]:
         out["reason"] = "NOT_DEPLOYED"
-        out["message"] = "실측 분석은 실제 방문자가 오는 배포 주소가 있어야 해요."
+        out["message"] = "실제 고객 데이터 분석은 실제 방문자가 오는 배포 주소가 있어야 해요."
     if site is None:
         return out
     recent = MeasureHit.objects.filter(site=site, created_at__gte=now - timedelta(hours=24))
@@ -239,14 +239,14 @@ def mapping_dict(project, site, report=None):
 def save_mapping(project, site, mapping):
     """{step_id: stage_id | null}. 없는 단계 ID 는 422. 보낸 행만 바꾸지 않고 통째로 바꾼다."""
     if not isinstance(mapping, dict) or len(mapping) > 500:
-        raise ApiError(422, "VALIDATION_ERROR", "mapping 은 {단계 ID: 퍼널 단계 ID} 객체여야 합니다.",
+        raise ApiError(422, "VALIDATION_ERROR", "mapping 은 {단계 ID: 이동 단계 ID} 객체여야 합니다.",
                        {"mapping": ["객체여야 합니다."]})
     stage_ids = {s["id"] for s in prediction_stages(latest_report(project))}
     bad = sorted(k for k, v in mapping.items()
                  if not isinstance(k, str) or not k or len(k) > MAX_PATH or (v is not None and v not in stage_ids))
     if bad:
-        raise ApiError(422, "VALIDATION_ERROR", "알 수 없는 퍼널 단계가 있습니다.",
-                       {f"mapping.{k}": ["알 수 없는 퍼널 단계입니다."] for k in bad[:20]})
+        raise ApiError(422, "VALIDATION_ERROR", "알 수 없는 이동 단계가 있습니다.",
+                       {f"mapping.{k}": ["알 수 없는 이동 단계입니다."] for k in bad[:20]})
     site.mapping = dict(mapping)
     site.mapping_saved_at = timezone.now()
     site.save(update_fields=["mapping", "mapping_saved_at"])

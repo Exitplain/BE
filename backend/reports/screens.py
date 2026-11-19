@@ -105,7 +105,7 @@ def _task_screens(task, sessions, causes, shot_url):
 
 def report_screens(report):
     """GET /reports/{id}/screens 응답. 실행 기록(DB)이 있는 리포트만 화면 캡처가 있다."""
-    note = "가상 페르소나의 모의 결과입니다. 감지된 마찰은 목표에 도달한 세션이 겪은 것도 셉니다."
+    note = "가상 페르소나의 모의 결과입니다. 감지된 불편한 점은 목표에 도달한 방문이 겪은 것도 셉니다."
     if not report.run_id:
         return {"report_id": str(report.id), "available": False, "reason": "NO_SCREENSHOTS",
                 "message": "화면 캡처가 없는 예전·샘플 리포트예요.", "tasks": [], "note": note}

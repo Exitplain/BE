@@ -31,7 +31,7 @@ def _comparison(basis):
     if not basis:
         return None
     seq = basis.get("run_sequence")
-    return f"{f'{seq}차' if seq else '사전 테스트'} vs 실측 최근 {basis.get('days', 7)}일"
+    return f"{f'{seq}차' if seq else '사전 테스트'} vs 실제 고객 데이터 최근 {basis.get('days', 7)}일"
 
 
 def _days(request):
@@ -57,7 +57,7 @@ def _expected(request, revision):
     if isinstance(expected, bool) or not isinstance(expected, int):
         raise ApiError(422, "VALIDATION_ERROR", "expected_revision 이 필요합니다.", {"expected_revision": ["숫자"]})
     if expected != revision:
-        raise ApiError(409, "REVISION_CONFLICT", "다른 보정이 먼저 적용됐어요. 새로고침한 뒤 다시 확인해 주세요.")
+        raise ApiError(409, "REVISION_CONFLICT", "다른 예측 맞추기가 먼저 적용됐어요. 새로고침한 뒤 다시 확인해 주세요.")
 
 
 def _create(project, user, revision, **fields):
@@ -65,7 +65,7 @@ def _create(project, user, revision, **fields):
         with transaction.atomic():
             return CalibrationRevision.objects.create(project=project, revision=revision + 1, created_by=user, **fields)
     except IntegrityError as exc:       # 같은 순간 다른 적용이 먼저 들어감
-        raise ApiError(409, "REVISION_CONFLICT", "다른 보정이 먼저 적용됐어요. 새로고침한 뒤 다시 확인해 주세요.") from exc
+        raise ApiError(409, "REVISION_CONFLICT", "다른 예측 맞추기가 먼저 적용됐어요. 새로고침한 뒤 다시 확인해 주세요.") from exc
 
 
 class CalibrationView(BaseAPIView):
@@ -137,7 +137,7 @@ class RestoreView(BaseAPIView):
     def post(self, request, revision_id):
         target = CalibrationRevision.objects.select_related("project").filter(pk=revision_id).first()
         if target is None:
-            raise ApiError(404, "NOT_FOUND", "보정 기록을 찾을 수 없습니다.")
+            raise ApiError(404, "NOT_FOUND", "예측 맞추기 기록을 찾을 수 없습니다.")
         project = ensure_owner(request.user, target.project)
         revision, _ = current(project)
         _expected(request, revision)
@@ -174,7 +174,7 @@ class CompareView(BaseAPIView):
                 raise ApiError(422, "VALIDATION_ERROR", "revision 은 숫자입니다.", {"revision": ["숫자"]})
         rev = cmp.revision_or_404(project, revision)
         if rev is None:
-            raise ApiError(404, "NOT_FOUND", "보정 기록을 찾을 수 없습니다.")
+            raise ApiError(404, "NOT_FOUND", "예측 맞추기 기록을 찾을 수 없습니다.")
         return Response(cmp.compare(project, rev))
 
 

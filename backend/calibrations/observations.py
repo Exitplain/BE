@@ -93,7 +93,7 @@ def clean(project, body, tasks):
         _fail("outcome", "완료 또는 이탈을 골라 주세요.")
     purpose = body.get("purpose") or HumanObservation.Purpose.CALIBRATION
     if purpose not in HumanObservation.Purpose.values:
-        _fail("purpose", "보정용 또는 평가용을 골라 주세요.")
+        _fail("purpose", "예측 맞추기용 또는 평가용을 골라 주세요.")
     stage_id, cause = body.get("stage_id") or "", body.get("cause") or ""
     if outcome == "success":
         if stage_id or cause:
