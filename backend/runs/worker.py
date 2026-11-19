@@ -133,7 +133,9 @@ class Worker:
                 if cancelled:
                     self._cancel_all(run, jobs, pending)
                     break
-                while pending and len(jobs) < capacity:
+                # 과업은 하나씩: 앞 과업이 모두 끝나야 다음 과업을 시작한다. 같은 과업의 시드끼리는 capacity 만큼 동시에
+                while pending and len(jobs) < capacity and all(
+                        job.task_run.task_key == pending[0].task_key for job in jobs):
                     job = self._start(pending.pop(0))
                     if job is not None:
                         jobs.append(job)
