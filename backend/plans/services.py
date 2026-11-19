@@ -201,8 +201,12 @@ def update_plan(plan_id, revision, data):
         plan.additional_request = data["additional_request"].strip()
         fields.add("additional_request")
     if "audience" in data:
+        before = (plan.audience_context, list(plan.ages))
         _apply_audience(plan, data["audience"])
         fields |= {"audience_context", "ages"}
+        if (plan.audience_context, plan.ages) != before and plan.segment_profiles:
+            plan.segment_profiles = {}                   # 타겟이 바뀌면 추론한 세그먼트 유형은 다시 만든다
+            fields.add("segment_profiles")
     if "segments" in data:
         _apply_segments(plan, data["segments"])
         fields.add("segments")
@@ -212,6 +216,26 @@ def update_plan(plan_id, revision, data):
     if not fields:
         raise validation_error("non_field_errors", "바꿀 필드를 한 개 이상 보내주세요.")
     return _save(plan, sorted(fields))
+
+
+# ---------- 세그먼트 유형 추론 (3단계) ----------
+
+def infer_segments(plan_id, revision):
+    """타겟 설명·연령대로 세그먼트 유형(이름·상황·기본 능력치)을 미리 만든다. 다시 부르면 새로 만든다."""
+    from personas.services import infer_segment_profiles
+    plan = _locked(plan_id)
+    _check_revision(plan, revision)
+    if not plan.audience_context.strip():
+        raise validation_error("audience.context", "타겟 고객 설명을 먼저 적어 주세요.")
+    plan.segment_profiles = infer_segment_profiles(plan.audience_context, plan.ages, plan.segments)
+    return _save(plan, ["segment_profiles"])
+
+
+def segment_view(plan):
+    """화면용 세그먼트: 인원(segments)에 추론한 유형(segment_profiles)을 붙인다. 추론 전이면 name 이 None."""
+    items = {p["id"]: p for p in (plan.segment_profiles or {}).get("items", [])}
+    keys = ("name", "situation", "age_group", "variables", "basis", "avatar")
+    return [{**s, **{k: items.get(s["id"], {}).get(k) for k in keys}} for s in plan.segments]
 
 
 # ---------- 시작 전 확인 (P05c) ----------
@@ -320,7 +344,8 @@ def confirm_plan(plan_id, revision, user):
     snapshot = PlanSnapshot(plan=plan, plan_revision=plan.revision, data=data,
                             persona_generator="", confirmed_by=user)
     snapshot.save()
-    generator, segments, personas = create_personas(snapshot, plan.audience_context, plan.ages, plan.segments)
+    generator, segments, personas = create_personas(snapshot, plan.audience_context, plan.ages, plan.segments,
+                                                    profiles=plan.segment_profiles or None)
     snapshot.persona_generator = generator
     if uses_test_accounts(plan):
         from testaccounts.services import snapshot_accounts
@@ -350,6 +375,8 @@ def plan_dict(plan):
         "audience": {"context": plan.audience_context, "ages": plan.ages},
         "task_funnels": [catalog.default_funnel(t) for t in plan.task_ids],   # 보기 전용 (자동 7단계)
         "segments": plan.segments, "limits": plan.limits,
+        "segment_profiles": segment_view(plan),        # 3단계에서 추론한 세그먼트 유형 (추론 전이면 name 이 None)
+        "segment_generator": (plan.segment_profiles or {}).get("generator"),
         "review": review(plan),
         "snapshots": [{"plan_revision_id": str(s.id), "plan_revision": s.plan_revision,
                        "confirmed_at": s.confirmed_at.isoformat()} for s in plan.snapshots.all()[:10]],
