@@ -1,4 +1,7 @@
 """테스트 계획 업무 규칙: 생성 → 수정(If-Match) → 확정(스냅샷 + 페르소나)."""
+from urllib.parse import urlsplit
+
+from django.conf import settings
 from django.db import transaction
 
 from common.exceptions import ApiError, validation_error
@@ -122,8 +125,42 @@ def _apply_custom_tasks(plan, texts):
         raise validation_error("custom_tasks", "빈 과업은 추가할 수 없습니다.")
     if len(set(texts)) != len(texts):
         raise validation_error("custom_tasks", "같은 과업이 두 번 들어 있습니다.")
-    # 자유 입력 과업은 검토 전(draft)이라 실행에 넣지 않는다 (기능명세서 PLAN-02)
+    # 자유 입력 과업은 저장 때는 검토 전(draft)이다. 확정할 때 목표·성공 기준으로 바꿔 실행에 넣는다
+    # (기능명세서 PLAN-02, _custom_run_tasks). EXITPLAIN_RUN_CUSTOM_TASKS 를 끄면 예전처럼 실행에 넣지 않는다
     plan.custom_tasks = [{"id": f"custom_{i}", "text": t, "state": "draft"} for i, t in enumerate(texts, 1)]
+
+
+def runs_custom_tasks(plan):
+    return bool(plan.custom_tasks) and getattr(settings, "EXITPLAIN_RUN_CUSTOM_TASKS", False)
+
+
+def _custom_start(plan):
+    """직접 추가한 과업의 시작 화면. 데모 쇼핑몰 과업은 case 로, 사이트 확인(explore) 과업은 start_path 로 연다
+    (plans/run_input.py _target_url). 확인 결과 과업 중 start_path 가 하나라도 있으면 explore 로 본다."""
+    if any(t.get("start_path") for t in plan.discovery.tasks or []):
+        return {"start_path": urlsplit(plan.discovery.entry_url).path or "/", "case": None}
+    return {"case": "all"}
+
+
+def _custom_run_tasks(plan):
+    """직접 추가한 과업 → 실행할 과업 (PLAN-02).
+
+    사용자 문장은 할 일이라 판정 모델이 성공을 확인하기 어렵다. agent/criteria.py 가 모델로 "목표에 도달했을 때
+    화면에 보이는 것"을 한 문장으로 다듬고, 모델을 못 쓰면 정해진 문장 틀을 쓴다 (확정이 막히지 않음).
+    success_path 가 없으므로 워커가 이 과업만 AGENT_CRITERIA_POLICY(claude)로 돌린다 (runs/worker.py).
+    """
+    if not runs_custom_tasks(plan):
+        return []
+    from agent.criteria import draft_criteria
+    drafts = draft_criteria([{"id": c["id"], "text": c["text"]} for c in plan.custom_tasks],
+                            entry_url=plan.discovery.entry_url, screen_names=plan.discovery.screen_names)
+    start = _custom_start(plan)
+    return [{"id": c["id"], "name": c["text"][:60], "custom": True, "feature_id": None, "suggested": False, **start,
+             "goal": drafts[c["id"]]["goal"], "success_path": None,
+             "success_criteria": drafts[c["id"]]["success_criteria"],
+             "criteria_source": drafts[c["id"]]["criteria_source"],
+             "funnel": catalog.default_funnel(c["id"])["stages"]}
+            for c in plan.custom_tasks]
 
 
 def _apply_audience(plan, audience):
@@ -223,15 +260,18 @@ def review(plan):
     tasks = plan.discovery.task_map()
     personas = sum(s["count"] for s in plan.segments)
     seeds = plan.limits["seed_count"]
+    custom_run = runs_custom_tasks(plan)
+    custom_names = [c["text"] for c in plan.custom_tasks] if custom_run else []
     return {
         "site": {"entry_url": plan.discovery.entry_url, "login_mode": plan.discovery.login_mode, "edit_step": 1},
-        "tasks": {"names": [tasks[t]["name"] for t in plan.task_ids], "edit_step": 2},
+        "tasks": {"names": [tasks[t]["name"] for t in plan.task_ids], "custom_names": custom_names, "edit_step": 2},
         "audience": {"context": plan.audience_context, "age_labels": _age_labels(plan.ages), "edit_step": 2},
-        "not_in_run": {"custom_tasks": plan.custom_tasks, "additional_request": plan.additional_request},
+        "not_in_run": {"custom_tasks": [] if custom_run else plan.custom_tasks,
+                       "additional_request": plan.additional_request},
         "funnels": {"auto": True, "stages_per_task": {f["task_id"]: len(f["stages"]) for f in plan.task_funnels}},
         "personas": {"segments": len(plan.segments), "total": personas, "edit_step": 3},
         "limits": plan.limits,
-        "total_sessions": personas * len(plan.task_ids) * seeds,
+        "total_sessions": personas * (len(plan.task_ids) + len(custom_names)) * seeds,
         "blocking": blocking_reasons(plan),
     }
 
@@ -255,6 +295,7 @@ def confirm_plan(plan_id, revision, user):
 
     tasks = plan.discovery.task_map()
     funnels = {t: catalog.default_funnel(t)["stages"] for t in plan.task_ids}
+    custom = _custom_run_tasks(plan)        # 모델 호출이 있을 수 있다 (agent/criteria.py, 실패해도 막지 않음)
     data = {
         "schema_version": "plan-snapshot-1",
         "plan_id": str(plan.id),
@@ -268,8 +309,9 @@ def confirm_plan(plan_id, revision, user):
                  "source": _site_source(plan)},
         "features": plan.discovery.features,
         "screen_names": dict(plan.discovery.screen_names or {}),   # 화면 역할 이름 (리포트·세션 표시용, 에이전트에는 안 넘김)
-        "tasks": [{**tasks[t], "funnel": funnels[t]} for t in plan.task_ids],
-        "not_in_run": {"custom_tasks": plan.custom_tasks, "additional_request": plan.additional_request},
+        "tasks": [{**tasks[t], "funnel": funnels[t]} for t in plan.task_ids] + custom,
+        "not_in_run": {"custom_tasks": [] if custom else plan.custom_tasks,
+                       "additional_request": plan.additional_request},
         "audience": {"context": plan.audience_context, "ages": plan.ages, "age_labels": _age_labels(plan.ages),
                      "age_usage": "context_only"},
         "frustration_enabled": True,     # 토글이 Figma에서 빠짐. 예전 스냅샷과 같은 모양을 위해 남긴다
@@ -288,7 +330,7 @@ def confirm_plan(plan_id, revision, user):
         "persona_generator": generator,
         "segments": segments,
         "personas": personas,
-        "total_sessions": len(personas) * len(plan.task_ids) * plan.limits["seed_count"],
+        "total_sessions": len(personas) * len(data["tasks"]) * plan.limits["seed_count"],
     }
     snapshot.save(update_fields=["persona_generator", "data"])
     return snapshot
