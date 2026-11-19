@@ -78,6 +78,21 @@ class GenerateTests(SimpleTestCase):
             with self.subTest(message=message), self.assertRaisesRegex(GenerationError, message):
                 llm.generate("대학생", ["20s", "30s"], [3, 3, 2, 2], client=FakeClient(segments))
 
+    def test_sensitive_life_circumstances_are_rewritten_once(self):
+        """'이혼 후 1인가구'처럼 민감한 생활 사정을 이름에 쓰면 한 번 다시 만들게 하고, 또 쓰면 실패로 돌려준다."""
+        bad = FOUR[:2] + [seg("이혼 후 1인가구 재정비족", "30s"), seg("은퇴 후 독거 생활 안정족", "30s")]
+        client = FakeClient(bad)
+        drafts = iter([bad, FOUR])
+        client.messages.parse = lambda **kwargs: (client.calls.append(kwargs), SimpleNamespace(
+            parsed_output=llm.Draft(segments=next(drafts)), stop_reason="end_turn"))[1]
+        result = llm.generate("반찬 쇼핑몰", ["20s", "30s"], [3, 3, 2, 2], client=client)
+        self.assertEqual([r["name"] for r in result], [s.name for s in FOUR])
+        self.assertEqual(len(client.calls), 2)
+        self.assertIn("이혼 후 1인가구 재정비족", client.calls[1]["messages"][-1]["content"])
+        self.assertIn("Never name or describe a segment by sensitive", client.calls[0]["system"])
+        with self.assertRaisesRegex(GenerationError, "민감한"):
+            llm.generate("반찬 쇼핑몰", ["20s", "30s"], [3, 3, 2, 2], client=FakeClient(bad))
+
     def test_refusal_or_missing_key_is_an_explicit_failure(self):
         with self.assertRaisesRegex(GenerationError, "결과를 주지"):
             llm.generate("대학생", ["20s"], [3, 3, 2, 2], client=FakeClient(None, stop_reason="refusal"))
