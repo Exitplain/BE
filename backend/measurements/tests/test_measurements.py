@@ -311,3 +311,36 @@ class FunnelEntryAndBaseTests(MeasureHelpers, TestCase):
         ReportSnapshot.objects.create(plan_snapshot=base.plan_snapshot, run=repro, run_ref=str(repro.id), revision=1,
                                       status="final", source="database", data={"tasks": []})
         self.assertEqual(services.latest_report(self.project), base)
+
+
+ALL_SCREENS_DATA = {"tasks": [
+    {"task_id": "order", "name": "첫 주문", "journey_funnel": {
+        "valid_sessions": 20,
+        "stages": [_reached("/", "첫 화면", 20), _reached("/delivery", "배송 지역", 18)],
+        "screens_all": [
+            {"id": "/", "path": "/", "name": "/", "reached": 20, "order": 0, "in_funnel": True, "is_goal": False},
+            {"id": "/delivery", "path": "/delivery", "name": "/delivery", "reached": 18, "order": 1,
+             "in_funnel": True, "is_goal": False},
+            {"id": "/cart", "path": "/cart", "name": "장바구니", "reached": 2, "order": 2, "in_funnel": False,
+             "is_goal": False}]}},
+]}
+
+
+@patch("discoveries.services.run_discovery", side_effect=fake_discovery)
+class AllScreensMappingTests(MeasureHelpers, TestCase):
+    REPORT = ALL_SCREENS_DATA
+
+    def test_screens_outside_the_report_funnel_can_be_mapped_and_compared(self, _):
+        self.report()
+        key = self.issue()
+        for i in range(10):
+            self.send(key, "/", sid=f"visitor{i:04d}")
+        for i in range(6):
+            self.send(key, "/cart", sid=f"visitor{i:04d}")
+        body = self.client.get(self.url + "/mapping").json()
+        self.assertEqual([s["id"] for s in body["stages"]], ["/", "/delivery", "/cart"])
+        self.assertEqual({r["step_id"]: r["suggestion"] for r in body["rows"]}["/cart"], "exact")
+        self.assertEqual(body["stages"][0]["name"], "첫 화면")                  # 퍼널 단계 이름을 쓴다
+        rows = {r["id"]: r for r in self.client.get(self.url + "/funnel").json()["tasks"][0]["stages"]}
+        self.assertEqual(rows["/cart"]["actual"]["rate"], 60.0)
+        self.assertTrue(rows["/cart"]["gap"])                                  # 예측 도달 낮음(2/20) vs 실측 60%

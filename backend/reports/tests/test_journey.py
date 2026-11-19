@@ -105,3 +105,17 @@ class ReportIntegrationTests(SimpleTestCase):
         task = build_report_data(snapshot, records)["tasks"][0]
         self.assertEqual(len(task["funnel"]), 7)                                   # 기존 화면 호환
         self.assertEqual([s["id"] for s in task["journey_funnel"]["stages"]], ["/", "/delivery", "/delivery/result"])
+
+
+class AllScreensTests(SimpleTestCase):
+    """screens_all: 리포트 퍼널(20% 이상)에서 빠진 화면도 실측 매핑·비교용으로 남긴다."""
+
+    def test_rare_screens_are_kept_outside_the_funnel(self):
+        rows = [row(["/", "/delivery"], kind="dropout") for _ in range(9)]
+        rows.append(row(["/", "/cart", "/signup"], kind="dropout"))
+        funnel = journey_funnel(rows, success_path="/order/success")
+        self.assertEqual([s["id"] for s in funnel["stages"]], ["/", "/delivery"])
+        every = {s["id"]: s for s in funnel["screens_all"]}
+        self.assertEqual(set(every), {"/", "/delivery", "/cart", "/signup"})
+        self.assertEqual((every["/cart"]["reached"], every["/cart"]["in_funnel"]), (1, False))
+        self.assertEqual((every["/"]["in_funnel"], every["/"]["name"]), (True, "/"))

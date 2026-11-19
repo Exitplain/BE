@@ -52,9 +52,9 @@ def predictions(project):
     by_task = _screens_by_task(report)
     out = {}
     for task in (report.data.get("tasks") or []) if report else []:
-        funnel = task.get("journey_funnel") or {}
-        stages = funnel.get("stages") or []
-        worst = max(stages, key=lambda s: (s.get("dropouts_here", 0), -s.get("order", 0)), default=None)
+        stages = measure.agent_screens(task)                 # 고를 수 있는 화면: 에이전트가 도달한 모든 화면
+        funnel_stages = (task.get("journey_funnel") or {}).get("stages") or []   # 이탈 수는 퍼널 단계에만 있다
+        worst = max(funnel_stages, key=lambda s: (s.get("dropouts_here", 0), -s.get("order", 0)), default=None)
         top = next((c.get("key") for c in task.get("causes") or [] if c.get("dropouts") and c.get("key") in CAUSES), None)
         out[task["task_id"]] = {
             "name": task.get("name") or task["task_id"],
