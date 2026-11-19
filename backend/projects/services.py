@@ -132,6 +132,8 @@ def _with_last_pretest(queryset):
     revision = apps.get_model("calibrations", "CalibrationRevision").objects.filter(
         project=OuterRef("pk")).order_by("-revision")
     site = apps.get_model("measurements", "MeasureSite").objects.filter(project=OuterRef("pk"))
+    imports = apps.get_model("measurements", "MeasureImport").objects.filter(
+        site__project=OuterRef("pk")).order_by("-created_at")
     return queryset.annotate(
         lp_id=Subquery(latest.values("id")[:1]),
         lp_no=Subquery(latest.values("sequence_no")[:1]),
@@ -144,6 +146,7 @@ def _with_last_pretest(queryset):
         cal_basis=Subquery(revision.values("basis")[:1]),
         ms_id=Subquery(site.values("id")[:1]),
         ms_last=Subquery(site.values("last_received_at")[:1]),
+        ms_import=Subquery(imports.values("created_at")[:1]),
     )
 
 
@@ -179,11 +182,15 @@ def _calibration(project):
 
 
 def _measurement(project):
-    """실측 연결 상태. 수집 키가 없으면 미연결, 키는 있는데 아직 받은 기록이 없으면 대기, 받았으면 연결됨."""
+    """실측 연결 상태. 수집 키가 없으면 미연결, 키는 있는데 아직 받은 기록이 없으면 대기, 받았으면 연결됨.
+
+    스크립트를 못 넣어 CSV 로 올린 기록이 있어도 연결됨으로 본다 (last_imported_at 은 마지막으로 올린 시각).
+    """
     if getattr(project, "ms_id", None) is None:
-        return {"status": "unconnected", "last_received_at": None}
-    last = project.ms_last
-    return {"status": "connected" if last else "waiting", "last_received_at": _iso(last)}
+        return {"status": "unconnected", "last_received_at": None, "last_imported_at": None}
+    last, imported = project.ms_last, getattr(project, "ms_import", None)
+    return {"status": "connected" if last or imported else "waiting", "last_received_at": _iso(last),
+            "last_imported_at": _iso(imported)}
 
 
 def _domain(url):
