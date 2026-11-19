@@ -42,7 +42,8 @@ INSTRUCTIONS = (
     "Never derive abilities from age alone or use age stereotypes. "
     "age_group must be one of the given age group ids exactly (for example 20s), not the Korean label. "
     "Name and describe segments by how and why they use the product (goal, timing, device, shopping habit), "
-    "for example '평일 저녁 빠른 장보기족' or '주말 한꺼번에 장보기족'. Never name or describe a segment by sensitive "
+    "and always end the name with '형' (type), for example '빠른 구매형', '꼼꼼한 비교형' or '주말 몰아 장보기형'; "
+    "never end it with '족'. Never name or describe a segment by sensitive "
     "personal circumstances: marital status or divorce, bereavement, living alone in old age, health or disability, "
     "religion, sexuality, gender, ethnicity, or financial hardship. Keep a neutral, respectful tone that the segment's "
     "members would be comfortable reading. "
@@ -120,6 +121,12 @@ def _call_failure(exc):
     return f"생성 모델을 부르지 못했습니다 ({name})."
 
 
+def _type_name(name):
+    """세그먼트 이름은 '~형'으로 통일한다. 모델이 '~족'으로 끝내면 '~형'으로 바꾼다."""
+    name = name.strip()
+    return name[:-1].rstrip() + "형" if name.endswith("족") else name
+
+
 def generate(audience_context, ages, segment_counts, client=None):
     count = len(segment_counts)
     allowed = _allowed_ages(ages)
@@ -158,7 +165,7 @@ def generate(audience_context, ages, segment_counts, client=None):
             {"role": "user", "content": "These segments mention sensitive personal circumstances: "
                                         + ", ".join(flagged) + ". Rewrite all segments by usage goal and habit only, "
                                         "same count and age groups."}]
-    return [{"name": s.name.strip(), "variables": s.variables.model_dump(), "basis": [b for b in s.basis if b][:5],
+    return [{"name": _type_name(s.name), "variables": s.variables.model_dump(), "basis": [b for b in s.basis if b][:5],
              "age_group": s.age_group, "situation": s.situation.strip()} for s in draft.segments]
 
 
