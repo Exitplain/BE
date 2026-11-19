@@ -6,6 +6,8 @@
 - 화면 캡처는 에이전트가 그 스텝에서 찍은 것이다. 마찰이 있었던 스텝의 캡처를 먼저 고른다.
 - 모델을 부르지 않는다. 이미 저장된 세션·관측만 다시 묶는다.
 - 기술 실패·한도 초과 세션은 세지 않는다 (리포트와 같은 기준). 모두 가상 페르소나의 모의 결과다.
+- voices: 그 화면에서 이탈한 세션이 왜 그만뒀는지를 사람이 말하듯 쓴 문장 (agent/explain.describe).
+  같은 문장은 묶어 몇 번 방문이 그랬는지·어느 세그먼트인지 센다. 말투만 사람처럼 바꾼 모델 판정 근거다.
 """
 import re
 from collections import defaultdict
@@ -15,6 +17,7 @@ from .journey import screen_id
 
 STEP_NUMBER = re.compile(r"(\d+)$")
 PROBLEM_LIMIT = 5
+VOICE_LIMIT = 3
 
 
 def _step(step_id):
@@ -23,9 +26,16 @@ def _step(step_id):
 
 
 def _detail(issue):
+    """불편한 점 한 줄. 입력 부담은 칸 수, 나머지는 페르소나가 말하듯 (예전 영어 summary 대신)."""
+    from agent.explain import REASONS
     if issue.get("category") == "input_burden" and issue.get("observed_fields") is not None:
         return f"필수 입력 {issue['observed_fields']}칸 (허용 {issue.get('configured_limit')}칸)"
-    return issue.get("summary") or ""
+    return REASONS.get(issue.get("category")) or issue.get("summary") or ""
+
+
+def _voice(session):
+    from agent.explain import describe
+    return describe(session.status, session.reason, session.issues or [], session.terminal_stage)
 
 
 def _task_screens(task, sessions, causes, shot_url):
@@ -34,13 +44,23 @@ def _task_screens(task, sessions, causes, shot_url):
     known = {s["id"] for s in stages}
     screens = {s["id"]: {"screen_id": s["id"], "name": s["name"], "order": s["order"], "reached": s["reached"],
                          "dropouts_here": s["dropouts_here"], "is_goal": s.get("is_goal", False),
-                         "screenshot_url": None, "_shot_rank": 9, "_frictions": defaultdict(dict)} for s in stages}
+                         "screenshot_url": None, "_shot_rank": 9, "_frictions": defaultdict(dict),
+                         "_voices": {}} for s in stages}
     cause_sessions = defaultdict(set)          # 원인 → 마찰을 겪은 세션
     cause_dropouts = defaultdict(set)          # 원인 → 이 원인이 주 원인으로 이탈한 세션
     cause_screens = defaultdict(lambda: defaultdict(set))
 
     for session, kind, observations in sessions:
         by_step = {o.step: o for o in observations}
+        if kind == "dropout" and observations:                 # 떠난 화면 = 마지막으로 본 화면
+            left = screen_id(observations[-1].url)
+            if left in screens:
+                text = _voice(session)
+                voice = screens[left]["_voices"].setdefault(text, {"text": text, "sessions": 0, "segments": []})
+                voice["sessions"] += 1
+                segment = getattr(session.persona_snapshot, "segment_name", "")
+                if segment and segment not in voice["segments"]:
+                    voice["segments"].append(segment)
         for o in observations:                                 # 캡처 후보: 이탈 세션 > 그 밖
             key = screen_id(o.url)
             if key in screens and o.artifact:
@@ -79,6 +99,8 @@ def _task_screens(task, sessions, causes, shot_url):
         frictions.sort(key=lambda f: (-f["sessions"], -f["dropouts"], f["category"]))
         s.pop("_shot_rank")
         s["frictions"] = frictions
+        voices = sorted(s.pop("_voices").values(), key=lambda v: (-v["sessions"], v["text"]))
+        s["voices"] = voices[:VOICE_LIMIT]
         s["friction_sessions"] = len(set().union(*(e["sessions"] for e in raw.values())))   # 이 화면에서 마찰을 겪은 세션 수
         out.append(s)
 
@@ -113,7 +135,8 @@ def report_screens(report):
     from runs.queries import observation_url
     technical = technical_statuses()
     causes = cause_names()
-    rows = (Session.objects.filter(run_id=report.run_id).prefetch_related("observations").order_by("task_id", "seed", "pk"))
+    rows = (Session.objects.filter(run_id=report.run_id).select_related("persona_snapshot")
+            .prefetch_related("observations").order_by("task_id", "seed", "pk"))
     by_task = defaultdict(list)
     for session in rows:
         kind = classify(session.status, technical)
