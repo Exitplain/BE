@@ -298,7 +298,7 @@ class LoopStatusTests(ProjectApiBase):
     def test_new_project_is_unconnected_and_before_calibration(self):
         project = self.project()
         measurement, calibration = self.loops(project)
-        self.assertEqual(measurement, {"status": "unconnected", "last_received_at": None})
+        self.assertEqual(measurement, {"status": "unconnected", "last_received_at": None, "last_imported_at": None})
         self.assertEqual(calibration, {"status": "before", "revision": None, "applied_at": None,
                                        "mean_error_pp": None})
 
@@ -328,10 +328,21 @@ class LoopStatusTests(ProjectApiBase):
         from measurements.models import MeasureSite
         project = self.project()
         site = MeasureSite.objects.create(project=project)
-        self.assertEqual(self.loops(project)[0], {"status": "waiting", "last_received_at": None})
+        self.assertEqual(self.loops(project)[0],
+                         {"status": "waiting", "last_received_at": None, "last_imported_at": None})
         received = timezone.now()
         MeasureSite.objects.filter(pk=site.pk).update(last_received_at=received)
-        self.assertEqual(self.loops(project)[0], {"status": "connected", "last_received_at": received.isoformat()})
+        self.assertEqual(self.loops(project)[0], {"status": "connected", "last_received_at": received.isoformat(),
+                                                  "last_imported_at": None})
+
+    def test_csv_import_counts_as_connected_without_script(self):
+        from measurements.models import MeasureImport, MeasureSite
+        project = self.project()
+        site = MeasureSite.objects.create(project=project)
+        record = MeasureImport.objects.create(site=site, sha256="0" * 64, rows_imported=3, sessions=1)
+        measurement = self.loops(project)[0]
+        self.assertEqual((measurement["status"], measurement["last_received_at"], measurement["last_imported_at"]),
+                         ("connected", None, record.created_at.isoformat()))
 
     def test_list_adds_no_query_per_project(self):
         from django.db import connection
