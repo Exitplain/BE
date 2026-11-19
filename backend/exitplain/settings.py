@@ -290,12 +290,18 @@ GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
 # 스크린샷·events.jsonl 저장 위치. 커밋 금지(artifacts/ 는 .gitignore 대상)
 # B 의 세션 상세는 EXITPLAIN_RUN_OUTPUT_DIR 에서 events.jsonl 을 읽으므로 같은 폴더를 쓴다 (기본 BE/artifacts)
 ARTIFACT_ROOT = (os.environ.get('ARTIFACT_ROOT') or os.environ.get('EXITPLAIN_RUN_OUTPUT_DIR')
-                 or str(BASE_DIR.parent / 'artifacts'))
+                or str(BASE_DIR.parent / 'artifacts'))
 # 에이전트를 실행할 파이썬 (agent 패키지가 설치된 가상환경). 에이전트 코드는 수정하지 않고 호출만 한다
 AGENT_PYTHON = os.environ.get('AGENT_PYTHON', sys.executable)
 # shop_scripted(기본)·scripted 는 API 키가 필요 없다. 데모 쇼핑몰은 shop_scripted. openai 는 AGENT_MODEL 과 OPENAI_API_KEY 환경변수가 필요
 # claude 는 ANTHROPIC_API_KEY 가 필요하다. AGENT_MODEL 을 비우면 Haiku 4.5, 막힌 스텝만 Sonnet 5 (agent/policies.py ClaudePolicy)
 AGENT_POLICY = os.environ.get('AGENT_POLICY', 'shop_scripted')
+# 성공 경로 없이 말로 쓴 성공 기준(success_criteria)만 있는 과업(직접 추가한 과업·사이트 확인으로 만든 과업)은
+# 정해진 흐름만 아는 scripted·shop_scripted 로는 못 하므로, 그 과업만 이 정책으로 돌린다 (ANTHROPIC_API_KEY 필요)
+AGENT_CRITERIA_POLICY = os.environ.get('AGENT_CRITERIA_POLICY', 'claude')
+# 직접 추가한 과업(PLAN-02)을 계획 확정 때 목표·성공 기준으로 바꿔 실행에 넣는다. 기본은 꺼 둔다(예전처럼 저장만).
+# 켜려면 서버 .env 에 EXITPLAIN_RUN_CUSTOM_TASKS=true. 켜면 그 과업은 AGENT_CRITERIA_POLICY 로 돈다 (runs/worker.py)
+EXITPLAIN_RUN_CUSTOM_TASKS = _env_bool('EXITPLAIN_RUN_CUSTOM_TASKS', False)
 
 # 테스트 계정 비밀번호 암호화 키 (Fernet). 비우면 DJANGO_SECRET_KEY에서 만든다 → 서버 .env를 따로 고칠 필요 없음
 TEST_ACCOUNT_KEY = os.environ.get('TEST_ACCOUNT_KEY', '')

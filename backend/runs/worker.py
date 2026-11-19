@@ -64,6 +64,23 @@ def terminate_tree(proc, grace=TERMINATE_GRACE_SECONDS):
         proc.wait(timeout=grace)
 
 
+SCRIPTED_POLICIES = {"scripted", "shop_scripted"}
+
+
+def agent_policy(task_input):
+    """과업 하나를 돌릴 정책.
+
+    정해진 흐름만 아는 scripted·shop_scripted 는 성공 경로(success_path)가 있는 과업만 할 수 있다.
+    성공 경로 없이 말로 쓴 성공 기준만 있는 과업(직접 추가한 과업·사이트 확인으로 만든 과업)은
+    AGENT_CRITERIA_POLICY(기본 claude)로 돌린다. 모델 정책(claude·openai)을 이미 쓰면 그대로 둔다.
+    """
+    default = settings.AGENT_POLICY
+    if default in SCRIPTED_POLICIES and not (task_input or {}).get("success_path") \
+            and (task_input or {}).get("success_criteria"):
+        return getattr(settings, "AGENT_CRITERIA_POLICY", "claude") or default
+    return default
+
+
 class _Job:
     def __init__(self, task_run, proc, log, input_path, deadline):
         self.task_run, self.proc, self.log, self.input_path, self.deadline = task_run, proc, log, input_path, deadline
@@ -148,8 +165,9 @@ class Worker:
         logs_dir.mkdir(parents=True, exist_ok=True)
         input_path = inputs_dir / f"{task_run.agent_run_id}.json"
         input_path.write_text(json.dumps(task_run.input_json, ensure_ascii=False), encoding="utf-8")
-        command = [*agent_command(), "--input", str(input_path), "--output", str(root), "--policy", settings.AGENT_POLICY]
-        if settings.AGENT_MODEL:
+        policy = agent_policy(task_run.input_json)
+        command = [*agent_command(), "--input", str(input_path), "--output", str(root), "--policy", policy]
+        if settings.AGENT_MODEL and policy == settings.AGENT_POLICY:
             command += ["--model", settings.AGENT_MODEL]
         log = open(logs_dir / f"{task_run.agent_run_id}.log", "ab")
         popen_args = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
