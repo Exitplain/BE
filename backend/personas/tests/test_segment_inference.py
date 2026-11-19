@@ -50,6 +50,15 @@ class SegmentInferenceTests(WizardMixin, TestCase):
         # 추론 없이 확정해도 예전처럼 그때 만든다
         self.assertEqual(len(self.confirm(plan)["data"]["segments"]), 4)
 
+    def test_generator_failure_is_503_with_reason_not_500(self, _):
+        plan = self.ready_plan()
+        with patch.object(generators, "generate",
+                          side_effect=generators.GenerationError("생성 모델 API 키가 맞지 않습니다")):
+            res = self.infer(plan)
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.json()["error"]["code"], "PERSONA_GENERATION_FAILED")
+        self.assertIn("API 키", res.json()["error"]["message"])
+
     def test_stale_revision_is_rejected(self, _):
         plan = self.ready_plan()
         res = self.client.post(f"/api/v1/plans/{plan['id']}/segment-inferences", {"revision": plan["revision"] - 1},
