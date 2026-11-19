@@ -38,3 +38,26 @@ class DiscoveryTests(WizardMixin, TestCase):
         mock.side_effect = RuntimeError("browser crashed")
         res = self.client.post(f"/api/v1/projects/{self.project.id}/discoveries", {}, format="json")
         self.assertEqual((res.status_code, res.json()["error"]["code"]), (503, "SITE_UNREACHABLE"))
+
+    def blank_project(self):
+        """주소 없이 만든 프로젝트 (주소는 새 테스트 1단계에서 입력한다)."""
+        self.project.entry_url = ""
+        self.project.allowed_origins = []
+        self.project.save(update_fields=["entry_url", "allowed_origins"])
+
+    def test_project_without_url_registers_the_entered_url(self, _):
+        self.blank_project()
+        with patch("runs.netguard.resolve_host", return_value=["93.184.216.34"]):
+            d = self.discover(entry_url="HTTP://Shop.Local:8080")
+        self.assertEqual(d["entry_url"], "http://shop.local:8080/")       # 프로젝트에 저장된 정규화 주소로 확인한다
+        self.project.refresh_from_db()
+        self.assertEqual((self.project.entry_url, self.project.allowed_origins),
+                         ("http://shop.local:8080/", ["http://shop.local:8080"]))
+
+    def test_project_without_url_needs_an_url(self, _):
+        self.blank_project()
+        res = self.client.post(f"/api/v1/projects/{self.project.id}/discoveries", {}, format="json")
+        self.assertEqual(res.status_code, 422, res.content)
+        self.assertEqual(res.json()["error"]["fields"]["entry_url"], ["사이트 URL을 입력해주세요"])
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.entry_url, "")

@@ -9,7 +9,6 @@ from common.exceptions import ApiError
 from .services import normalize_entry_url
 
 NAME_REQUIRED = "프로젝트 이름을 입력해주세요"
-URL_REQUIRED = "사이트 URL을 입력해주세요"
 
 
 class StrictSerializer(serializers.Serializer):
@@ -27,14 +26,17 @@ class ProjectCreateSerializer(StrictSerializer):
     name = serializers.CharField(max_length=100, trim_whitespace=True, error_messages={
         "required": NAME_REQUIRED, "blank": NAME_REQUIRED, "null": NAME_REQUIRED,
         "max_length": "프로젝트 이름은 100자 이하로 입력해주세요"})
-    entry_url = serializers.CharField(max_length=500, trim_whitespace=True, error_messages={
-        "required": URL_REQUIRED, "blank": URL_REQUIRED, "null": URL_REQUIRED,
+    # 사이트 URL 은 선택이다. 비우면 주소 없는 프로젝트가 되고, 새 테스트 1단계에서 주소를 입력한다.
+    entry_url = serializers.CharField(max_length=500, trim_whitespace=True, required=False, allow_blank=True,
+                                      allow_null=True, default="", error_messages={
         "max_length": "사이트 URL은 500자 이하로 입력해주세요"})
     journey_note = serializers.CharField(max_length=300, required=False, allow_blank=True, default="",
                                          trim_whitespace=True, error_messages={
         "max_length": "점검할 고객 여정은 300자 이하로 입력해주세요"})
 
     def validate_entry_url(self, value):
+        if not value:        # 비움(빈 문자열·null·생략) = 주소 없는 프로젝트
+            return ""
         try:
             return normalize_entry_url(value)
         except ApiError as exc:

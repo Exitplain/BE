@@ -18,6 +18,7 @@ from common.exceptions import ApiError, validation_error
 from .models import Project
 
 URL_MESSAGE = "HTTP 또는 HTTPS로 시작하는 주소를 입력해주세요"
+URL_REQUIRED = "사이트 URL을 입력해주세요"   # 주소 없이 만든 프로젝트로 사이트 확인·URL 확인을 시작할 때
 DUPLICATE_MESSAGE = "이미 같은 주소의 프로젝트가 있어요"
 DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -59,12 +60,45 @@ def origin_of(url):
 
 # ---------- 등록 ----------
 
-def create_project(user, *, name, entry_url, journey_note=""):
+def _duplicate_exists(owner, url, exclude=None):
+    queryset = Project.objects.filter(owner=owner, archived_at__isnull=True, entry_url=url)
+    return (queryset.exclude(pk=exclude.pk) if exclude is not None else queryset).exists()
+
+
+def create_project(user, *, name, entry_url="", journey_note=""):
+    """주소(entry_url)는 선택이다. 비워 두면 허용 주소도 비고, 새 테스트 1단계에서 입력한 주소가 그 자리에 들어간다."""
+    if not (entry_url or "").strip():
+        return Project.objects.create(owner=user, name=name, entry_url="", allowed_origins=[], journey_note=journey_note)
     url = normalize_entry_url(entry_url)
-    if Project.objects.filter(owner=user, archived_at__isnull=True, entry_url=url).exists():
+    if _duplicate_exists(user, url):
         raise ApiError(409, "DUPLICATE_PROJECT", DUPLICATE_MESSAGE, {"entry_url": [DUPLICATE_MESSAGE]})
     return Project.objects.create(owner=user, name=name, entry_url=url, allowed_origins=[origin_of(url)],
                                   journey_note=journey_note)
+
+
+def attach_entry_url(project, raw_url):
+    """주소 없이 만든 프로젝트에 테스트 1단계에서 입력한 주소를 등록한다.
+
+    - 이미 주소가 있으면 아무것도 바꾸지 않는다 (주소 변경은 지원하지 않는다).
+    - 형식·같은 소유자의 중복 주소·SSRF(내부 주소) 검사는 프로젝트를 만들 때와 같은 규칙이다.
+    - 도달 여부는 여기서 보지 않는다. 그건 URL 확인(5.0)이 한다.
+    """
+    if project.entry_url:
+        return project
+    if not (raw_url or "").strip():
+        raise validation_error("entry_url", URL_REQUIRED)
+    url = normalize_entry_url(raw_url)
+    if _duplicate_exists(project.owner, url, exclude=project):
+        raise ApiError(409, "DUPLICATE_PROJECT", DUPLICATE_MESSAGE, {"entry_url": [DUPLICATE_MESSAGE]})
+    from runs import netguard   # projects 는 runs 보다 아래 계층이라 호출 시점에만 가져온다
+    try:
+        netguard.check_origin(url)
+    except netguard.TargetNotAllowed as exc:
+        raise ApiError(422, "TARGET_NOT_ALLOWED", str(exc), {"entry_url": [str(exc)]}) from None
+    project.entry_url = url
+    project.allowed_origins = [origin_of(url)]
+    project.save(update_fields=["entry_url", "allowed_origins", "updated_at"])
+    return project
 
 
 # ---------- 목록·검색 (cursor 페이지) ----------
@@ -226,8 +260,7 @@ def restore_project(project):
     from common.exceptions import ApiError
     if project.archived_at is None:
         return project
-    if Project.objects.filter(owner=project.owner, archived_at__isnull=True, entry_url=project.entry_url) \
-            .exclude(pk=project.pk).exists():
+    if project.entry_url and _duplicate_exists(project.owner, project.entry_url, exclude=project):   # 주소 없는 프로젝트는 겹치지 않는다
         raise ApiError(409, "DUPLICATE_PROJECT", "같은 주소의 프로젝트가 이미 있어요. 그 프로젝트를 먼저 삭제해 주세요.",
                        {"entry_url": ["같은 주소의 프로젝트가 있어요."]})
     project.archived_at = None
