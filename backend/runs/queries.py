@@ -62,6 +62,14 @@ def run_detail(run):
 
 # ---------- 세션 타일 (P11) ----------
 
+def _explanation(session):
+    """왜 끝났는지 한 줄 (agent/explain.py). 진행 중이면 None."""
+    if not session.is_terminal:
+        return None
+    from agent.explain import describe
+    return describe(session.status, session.reason, session.issues or [], session.terminal_stage)
+
+
 def _session_item(session):
     persona = session.persona_snapshot
     latest = None
@@ -72,6 +80,7 @@ def _session_item(session):
         "id": session.pk, "session_key": session.session_key,
         "persona": {"code": persona.code, "segment_id": persona.segment_id, "segment_name": persona.segment_name},
         "task_id": session.task_id, "seed": session.seed, "status": session.status, "reason": session.reason,
+        "explanation": _explanation(session),
         "steps": session.steps, "duration_seconds": session.duration_seconds, "max_frustration": session.max_frustration,
         "terminal_stage": session.terminal_stage, "stages_reached": session.stages_reached,
         "latest_observation": latest,

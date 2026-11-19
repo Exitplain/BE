@@ -113,6 +113,7 @@ class SessionResult(StrictModel):
     model_id: str | None
     status: Terminal
     reason: str
+    explanation: str | None = None                             # 왜 끝났는지 한 줄 (agent/explain.py)
     steps: int
     duration_seconds: float
     model_calls: int
