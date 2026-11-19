@@ -183,6 +183,7 @@ def session_row(r, technical, segment_of):
             "terminal_stage": stages[-1] if stages else None,
             "terminal_screen": screen_id(screens[-1].get("url")) if screens else None,   # 실행 퍼널 단계 ID (발견한 문제)
             "primary_cause": r.get("primary_cause"),
+            "explanation": r.get("explanation"),
             "steps": r.get("steps", 0), "duration_seconds": r.get("duration_seconds")}
 
 def build_report_data(snapshot_data, records):

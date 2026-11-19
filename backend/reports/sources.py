@@ -37,6 +37,12 @@ def _read_jsonl(path):
     return sorted(events, key=lambda e: e.get("sequence", 0))
 
 
+def describe(status, reason, issues, terminal_stage=None):
+    """세션이 왜 끝났는지 한 줄 (agent/explain.py). 이탈이면 어느 화면·주 원인·불만 점수."""
+    from agent.explain import describe as explain
+    return explain(status, reason, issues, terminal_stage)
+
+
 def _primary(issues):
     for issue in issues:
         if issue.get("primary"):
@@ -78,7 +84,10 @@ def load_attempt(attempt_dir):
             sessions[sid].update(status=payload.get("status", "incomplete"), reason=payload.get("reason", ""),
                                  steps=payload.get("steps", 0), duration_seconds=payload.get("duration_seconds"),
                                  causes=[i.get("category") for i in issues if i.get("category")],
-                                 primary_cause=_primary(issues))
+                                 primary_cause=_primary(issues),
+                                 explanation=payload.get("explanation") or describe(
+                                     payload.get("status", "incomplete"), payload.get("reason", ""), issues,
+                                     payload.get("terminal_stage")))
     return list(sessions.values())
 
 
@@ -118,5 +127,6 @@ def load_from_db(run):
             "screens": [{"url": o.url, "title": o.title, "text": (o.text or "")[:400]} for o in observations],
             "causes": [i.get("category") for i in issues if isinstance(i, dict) and i.get("category")],
             "primary_cause": _primary([i for i in issues if isinstance(i, dict)]),
+            "explanation": describe(s.status, s.reason, issues, s.terminal_stage) if s.is_terminal else None,
         })
     return records

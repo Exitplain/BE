@@ -55,8 +55,11 @@ def _summary(status, reason, steps, duration, terminal_stage, issues, timeline):
     primary = next((i.get("category") for i in issues if i.get("primary")), None)
     threshold = next((s["frustration_threshold"] for s in reversed(timeline)
                       if s["frustration_threshold"] is not None), None)
+    from agent.explain import describe
+
     return {
         "status": status, "reason": reason, "steps": steps, "duration_seconds": duration,
+        "explanation": describe(status, reason, issues, terminal_stage) if status != "incomplete" else None,
         "terminal_stage": terminal_stage or (timeline[-1]["stage"] if timeline else None),
         "primary_cause": {"key": primary, "name": CAUSES.get(primary, primary)} if primary else None,
         "causes": [{"key": i.get("category"), "name": CAUSES.get(i.get("category"), i.get("category"))}

@@ -8,6 +8,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright
 from .behavior import PersonaMeter
+from .explain import describe
 from .browser import observe, act, origin, login
 from .funnel import funnel_stage
 from .schemas import RunInput, SessionResult
@@ -213,6 +214,16 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                                 cause = meter.primary_cause()
                                 for issue in state["issues"]:
                                     issue["primary"] = issue["category"] == cause   # 이탈을 일으킨 주 원인 표시
+                                    if issue["primary"]:
+                                        # 이탈 순간의 근거: 떠난 화면, 점수, 원인별 누적 기여, 직전 행동 설명 (explain.describe)
+                                        last = next((h.get("explanation") for h in reversed(history) if h.get("explanation")), None)
+                                        issue["dropout"] = {
+                                            "step_id": step_id, "stage": stage, "path": urlsplit(obs["url"]).path,
+                                            "title": (obs.get("title") or "")[:120],
+                                            "score": point["score"], "threshold": point["threshold"],
+                                            "contributions": {k: round(v, 3) for k, v in sorted(
+                                                meter.contributions.items(), key=lambda kv: -kv[1]) if v > 0},
+                                            "last_thought": (last or "")[:160] or None}
                                 state.update(status="simulated_dropout", reason="Configured frustration threshold exceeded")
                                 return
                             state["calls"] += int(getattr(policy, "name", "") != "scripted_fixture")
@@ -300,6 +311,7 @@ async def execute_run(config: RunInput, policy_factory, output_dir="artifacts", 
                     result = SessionResult(session_id=sid, persona_id=persona.id,
                         policy=getattr(policy, "name", "custom_or_uninitialized"), model_id=getattr(policy, "model", None),
                         status=state["status"], reason=state["reason"], steps=state["steps"],
+                        explanation=describe(state["status"], state["reason"], state["issues"], stage),
                         duration_seconds=round(time.monotonic()-started, 3), model_calls=state["calls"],
                         input_tokens=state["input"], output_tokens=state["output"], usage_by_model=state["by_model"],
                         judgments=state["judgments"],
