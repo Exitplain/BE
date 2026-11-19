@@ -58,6 +58,16 @@ class PlanDetailView(BaseAPIView):
         return _plan_response(services.update_plan(plan.pk, revision, serializer.validated_data))
 
 
+class PlanSegmentInferenceView(BaseAPIView):
+    """POST /api/v1/plans/{id}/segment-inferences  {revision} — 3단계 세그먼트 유형 추론 (다시 부르면 새로 만든다)"""
+
+    def post(self, request, plan_id):
+        plan = _own_plan(request, plan_id)
+        serializer = ConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return _plan_response(services.infer_segments(plan.pk, serializer.validated_data["revision"]))
+
+
 class PlanConfirmationView(BaseAPIView):
     """POST /api/v1/plans/{id}/confirmations  {revision} — P05c 확정 → P06 페르소나 생성"""
 

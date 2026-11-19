@@ -28,6 +28,9 @@ class TestPlan(models.Model):
     # 3. 퍼널·페르소나
     task_funnels = models.JSONField(default=list)     # 자동 7단계 (편집 없음). DB 칸은 마이그레이션 없이 남겨 둔다
     segments = models.JSONField(default=list)         # [{id: "segment_1", count: 5}, ...]
+    # 3단계에서 미리 추론한 세그먼트 유형 {"generator", "items": [{id, name, situation, age_group, variables, basis, avatar}]}
+    # 확정 때 다시 만들지 않고 이것으로 페르소나를 만든다. 타겟 설명·연령대가 바뀌면 비운다.
+    segment_profiles = models.JSONField(default=dict, blank=True)
     frustration_enabled = models.BooleanField(default=True)   # Figma에서 토글이 빠져 항상 True
     limits = models.JSONField(default=dict)
 
