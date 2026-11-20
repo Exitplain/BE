@@ -8,6 +8,17 @@
 
 <br>
 
+## 🖥️ 서비스 소개
+
+<p align="center">
+  <img src="docs/images/key-feature-1.png" alt="KEY FEATURE 1" width="100%">
+  <img src="docs/images/key-feature-2.png" alt="KEY FEATURE 2" width="100%">
+  <img src="docs/images/key-feature-3.png" alt="KEY FEATURE 3" width="100%">
+  <img src="docs/images/key-feature-4.png" alt="KEY FEATURE 4" width="100%">
+</p>
+
+<br>
+
 ## 💡 팀원 소개
 
 <table>
@@ -28,7 +39,7 @@
     <td align="center"><img src="docs/images/team-female.jpg" width="90" alt="정혜원"></td>
   </tr>
   <tr>
-    <td align="center">디자인</td>
+    <td align="center">기획·디자인</td>
     <td align="center">프론트엔드</td>
     <td align="center">프론트엔드</td>
     <td align="center">기획·AI</td>
@@ -111,7 +122,8 @@
 
 <br>
 
-## 🛠️ 기술 스택
+## 🛠️ 기술 스택 
+
 
 **Backend** &nbsp;
 <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white">
@@ -130,6 +142,9 @@
 <img src="https://img.shields.io/badge/nginx-009639?style=for-the-badge&logo=nginx&logoColor=white">
 <img src="https://img.shields.io/badge/Gunicorn-499848?style=for-the-badge&logo=gunicorn&logoColor=white">
 <img src="https://img.shields.io/badge/GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white">
+
+<br>
+
 
 ### Backend
 | 구분 | 기술 |
