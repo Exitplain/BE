@@ -4,7 +4,7 @@
 | 단계 | 파일 | 하는 일 |
 |---|---|---|
 | CI | `.github/workflows/ci.yml` | PR·push 마다 `check`, 마이그레이션 누락 검사, 전체 테스트 |
-| CD | `.github/workflows/deploy.yml` | **Actions 탭에서 직접 실행**하면 서버에서 `deploy.sh main` 을 실행 |
+| CD | `.github/workflows/deploy.yml` | main에 머지되어 CI가 성공하면 **자동으로** 서버에서 `deploy.sh main`을 실행 |
 
 - 서버 접속에 **SSH(22번)를 쓰지 않는다.** GitHub 가 AWS 에서 임시 권한(OIDC)을 받아 **SSM `SendCommand`** 로 서버 안에서 배포 스크립트를 실행한다.
 - 장기 액세스 키를 GitHub 에 저장하지 않는다.
@@ -34,7 +34,7 @@ IAM → Roles → Create role → **Web identity**
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:Exitplain/BE:ref:refs/heads/main"}
+      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:Exitplain@<ORG_ID>/BE@<REPO_ID>:ref:refs/heads/main"}
     }
   }]
 }
@@ -67,21 +67,13 @@ Settings → Secrets and variables → Actions → **Variables** 탭
 역할 ARN 과 인스턴스 ID 는 비밀이 아니라 **Variables** 에 둔다 (Secrets 가 아님).
 
 ## 배포하는 법
-1. GitHub → **Actions** → **Deploy** → **Run workflow** (브랜치 `main`)
-2. 로그에서 `상태: Success` 와 `deploy.sh` 출력, `HTTP 200` 확인
+기본은 자동이다. main 에 머지되어 CI 가 성공하면 몇 분 안에 서버에 배포된다 (약 4~5분).
 
-## 자동 배포로 바꾸려면 (안정된 뒤)
-`deploy.yml` 의 `on:` 을 아래처럼 바꾼다. CI 가 성공한 `main` 에서만 배포된다.
-```yaml
-on:
-  workflow_dispatch:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
-```
-그리고 job 의 `if:` 를 `github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'` 로 바꾼다.
-자동 배포는 마이그레이션이 실패하면 서버가 깨질 수 있으니, 배포 전에 DB 백업 단계를 먼저 넣는 것을 권한다.
+## 자동 배포 동작
+- main 에 push 된 커밋의 CI 가 모두 성공해야 Deploy 가 실행된다. PR·develop 의 CI, 실패한 CI 는 배포하지 않는다.
+- 배포하면 서버에서 마이그레이션이 적용되고 exitplain-web·exitplain-worker 가 재시작된다.
+  (몇 초간 502, 실행 중인 테스트는 중단될 수 있다)
+- 자동 DB 백업 단계는 아직 없다. 마이그레이션이 있는 PR 은 머지 전에 백업(EBS 스냅샷)을 권한다.
 
 ## 주의
 - 배포 중 문제가 생기면 서버에서 직접 확인한다: `sudo journalctl -u exitplain-web -n 50 --no-pager`
