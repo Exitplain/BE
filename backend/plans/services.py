@@ -223,12 +223,18 @@ def update_plan(plan_id, revision, data):
 def infer_segments(plan_id, revision):
     """타겟 설명·연령대로 세그먼트 유형(이름·상황·기본 능력치)을 미리 만든다. 다시 부르면 새로 만든다."""
     from personas.services import infer_segment_profiles
-    plan = _locked(plan_id)
+    # 생성(LLM 이면 몇 초)은 잠그지 않고 하고, 저장할 때만 잠가 그사이 계획이 바뀌었는지 다시 본다.
+    # select_for_update 는 트랜잭션 안에서만 쓸 수 있다 (밖에서 쓰면 TransactionManagementError → 500).
+    plan = TestPlan.objects.get(pk=plan_id)
     _check_revision(plan, revision)
     if not plan.audience_context.strip():
         raise validation_error("audience.context", "타겟 고객 설명을 먼저 적어 주세요.")
-    plan.segment_profiles = infer_segment_profiles(plan.audience_context, plan.ages, plan.segments)
-    return _save(plan, ["segment_profiles"])
+    profiles = infer_segment_profiles(plan.audience_context, plan.ages, plan.segments)
+    with transaction.atomic():
+        plan = _locked(plan_id)
+        _check_revision(plan, revision)
+        plan.segment_profiles = profiles
+        return _save(plan, ["segment_profiles"])
 
 
 def segment_view(plan):

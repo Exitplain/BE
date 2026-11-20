@@ -36,6 +36,49 @@ def _counts(queryset):
     return dict(queryset.order_by().values_list("status").annotate(n=Count("id")))
 
 
+# ---------- 과업 진행 순서 ----------
+
+def task_order(run):
+    """계획에서 고른 과업 순서 {과업 id: 순번}. 워커는 이 순서(왼쪽 → 오른쪽)로, 과업마다 시드 1부터 돌린다."""
+    tasks = ((run.plan_snapshot.data or {}).get("tasks") or []) if run.plan_snapshot_id else []
+    return {t["id"]: i for i, t in enumerate(tasks) if isinstance(t, dict) and t.get("id")}
+
+
+def ordered_task_runs(run, task_runs):
+    order = task_order(run)
+    return sorted(task_runs, key=lambda t: (order.get(t.task_key, len(order)), t.seed, t.pk))
+
+
+TASK_PHASE = {"running": "running", "queued": "queued", "failed": "failed", "cancelled": "cancelled"}
+
+
+def task_progress(run):
+    """과업 탭에 그대로 쓰는 진행 순서와 상태. 시드가 여러 개면 하나라도 실행 중이면 running,
+    모두 끝났으면 done(하나라도 실패면 failed), 하나도 시작 안 했으면 queued."""
+    names = {t.get("id"): t.get("name") for t in ((run.plan_snapshot.data or {}).get("tasks") or [])
+             if isinstance(t, dict)} if run.plan_snapshot_id else {}
+    groups = {}
+    for task_run in ordered_task_runs(run, TaskRun.objects.filter(run=run)):
+        groups.setdefault(task_run.task_key, []).append(task_run.status)
+    out = []
+    for position, (key, statuses) in enumerate(groups.items(), start=1):
+        if TaskRun.Status.RUNNING in statuses:
+            phase = "running"
+        elif all(s == TaskRun.Status.QUEUED for s in statuses):
+            phase = "queued"
+        elif any(s == TaskRun.Status.QUEUED for s in statuses):
+            phase = "running"                        # 시드 일부만 끝남
+        elif TaskRun.Status.FAILED in statuses:
+            phase = "failed"
+        elif all(s == TaskRun.Status.CANCELLED for s in statuses):
+            phase = "cancelled"
+        else:
+            phase = "done"
+        out.append({"task_id": key, "name": names.get(key) or key, "position": position, "status": phase,
+                    "seeds": len(statuses)})
+    return out
+
+
 def run_detail(run):
     sessions = _counts(Session.objects.filter(run=run))
     task_runs = _counts(TaskRun.objects.filter(run=run))
@@ -49,6 +92,8 @@ def run_detail(run):
         # 이 실행이 쓴 보정 리비전 (0 = 기본 모형, CAL-04)
         "calibration_revision": (run.config or {}).get("calibration_revision", 0),
         "error": {"code": run.error_code, "message": run.error_message} if run.error_code else None,
+        # 과업 진행 순서 (계획 순서 = 실행 순서). 화면은 이 순서대로 왼쪽 → 오른쪽에 둔다
+        "tasks": task_progress(run),
         "progress": {
             "expected_sessions": (run.config or {}).get("expected_sessions", 0),
             "started_sessions": started,

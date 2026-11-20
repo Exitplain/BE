@@ -93,6 +93,31 @@ class GenerateTests(SimpleTestCase):
         with self.assertRaisesRegex(GenerationError, "민감한"):
             llm.generate("반찬 쇼핑몰", ["20s", "30s"], [3, 3, 2, 2], client=FakeClient(bad))
 
+    def test_model_call_errors_become_generation_errors_not_500(self):
+        """키 오류·한도 같은 호출 실패는 그대로 터지지 않고 이유가 있는 GenerationError(→ 503)로 바뀐다."""
+        class AuthenticationError(Exception):
+            pass
+
+        class RateLimitError(Exception):
+            pass
+
+        for exc, message in ((AuthenticationError("bad key"), "ANTHROPIC_API_KEY"),
+                             (RateLimitError("slow down"), "한도"), (ConnectionError("down"), "ConnectionError")):
+            client = FakeClient(FOUR)
+            client.messages.parse = lambda raise_=exc, **kwargs: (_ for _ in ()).throw(raise_)
+            with self.subTest(exc=type(exc).__name__), self.assertRaisesRegex(GenerationError, message), \
+                    self.assertLogs("personas.llm", "WARNING"):
+                llm.generate("대학생", ["20s", "30s"], [3, 3, 2, 2], client=client)
+
+    def test_segment_names_end_with_hyeong(self):
+        """세그먼트 이름은 '~형'으로 통일한다. 모델이 '~족'으로 끝내면 '~형'으로 바꾼다."""
+        segments = FOUR[:2] + [seg("평일 저녁 빠른 장보기족", "30s"), seg("주말 몰아 장보기 족", "30s")]
+        client = FakeClient(segments)
+        result = llm.generate("반찬 쇼핑몰", ["20s", "30s"], [3, 3, 2, 2], client=client)
+        self.assertEqual([r["name"] for r in result][2:], ["평일 저녁 빠른 장보기형", "주말 몰아 장보기형"])
+        self.assertIn("always end the name with '형'", client.calls[0]["system"])
+        self.assertNotIn("장보기족'", client.calls[0]["system"])
+
     def test_refusal_or_missing_key_is_an_explicit_failure(self):
         with self.assertRaisesRegex(GenerationError, "결과를 주지"):
             llm.generate("대학생", ["20s"], [3, 3, 2, 2], client=FakeClient(None, stop_reason="refusal"))

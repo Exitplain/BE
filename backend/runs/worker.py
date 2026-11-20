@@ -22,7 +22,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
-from . import importer
+from . import importer, queries
 from .models import Run, TaskRun
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,8 @@ class Worker:
 
     # ----- 실행 -----
     def execute(self, run):
-        pending = list(run.task_runs.filter(status=TaskRun.Status.QUEUED).order_by("task_key", "seed"))
+        # 계획에서 고른 과업 순서대로(화면 왼쪽 → 오른쪽), 과업마다 시드 1부터 (예전: 과업 id 알파벳순)
+        pending = queries.ordered_task_runs(run, run.task_runs.filter(status=TaskRun.Status.QUEUED))
         jobs = []
         capacity = max(1, settings.EXITPLAIN_WORKER_PROCESSES)
         last_beat = 0.0
@@ -132,7 +133,9 @@ class Worker:
                 if cancelled:
                     self._cancel_all(run, jobs, pending)
                     break
-                while pending and len(jobs) < capacity:
+                # 과업은 하나씩: 앞 과업이 모두 끝나야 다음 과업을 시작한다. 같은 과업의 시드끼리는 capacity 만큼 동시에
+                while pending and len(jobs) < capacity and all(
+                        job.task_run.task_key == pending[0].task_key for job in jobs):
                     job = self._start(pending.pop(0))
                     if job is not None:
                         jobs.append(job)

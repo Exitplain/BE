@@ -14,6 +14,7 @@ generate(audience_context, ages, segment_counts) -> [{"name", "variables", "basi
 확정한 결과는 PlanSnapshot 에 저장해 다시 쓴다 (다시 만들지 않는다).
 """
 import json
+import logging
 import os
 
 from pydantic import BaseModel, Field, ValidationError
@@ -21,6 +22,8 @@ from pydantic import BaseModel, Field, ValidationError
 from plans.catalog import AGE_OPTIONS
 
 from .generators import GenerationError
+
+logger = logging.getLogger(__name__)
 
 NAME = "claude-v1"
 MODEL = (os.environ.get("EXITPLAIN_PERSONA_MODEL") or os.environ.get("DROPSPOT_DEFAULT_MODEL") or "claude-haiku-4-5").strip()   # 기본 Haiku, .env 로 바꾼다
@@ -39,7 +42,8 @@ INSTRUCTIONS = (
     "Never derive abilities from age alone or use age stereotypes. "
     "age_group must be one of the given age group ids exactly (for example 20s), not the Korean label. "
     "Name and describe segments by how and why they use the product (goal, timing, device, shopping habit), "
-    "for example '평일 저녁 빠른 장보기족' or '주말 한꺼번에 장보기족'. Never name or describe a segment by sensitive "
+    "and always end the name with '형' (type), for example '빠른 구매형', '꼼꼼한 비교형' or '주말 몰아 장보기형'; "
+    "never end it with '족'. Never name or describe a segment by sensitive "
     "personal circumstances: marital status or divorce, bereavement, living alone in old age, health or disability, "
     "religion, sexuality, gender, ethnicity, or financial hardship. Keep a neutral, respectful tone that the segment's "
     "members would be comfortable reading. "
@@ -106,6 +110,23 @@ def _sensitive(draft):
     return [s.name for s in draft.segments if any(w in f"{s.name} {s.situation}" for w in SENSITIVE)]
 
 
+def _call_failure(exc):
+    name = type(exc).__name__
+    if name in ("AuthenticationError", "PermissionDeniedError"):
+        return f"생성 모델 API 키가 맞지 않습니다 ({name}). 서버의 ANTHROPIC_API_KEY 를 확인해 주세요."
+    if name == "RateLimitError":
+        return f"생성 모델 호출 한도에 걸렸습니다 ({name}). 잠시 뒤 다시 시도해 주세요."
+    if name == "NotFoundError":
+        return f"생성 모델 이름을 찾지 못했습니다 ({name}). EXITPLAIN_PERSONA_MODEL 을 확인해 주세요."
+    return f"생성 모델을 부르지 못했습니다 ({name})."
+
+
+def _type_name(name):
+    """세그먼트 이름은 '~형'으로 통일한다. 모델이 '~족'으로 끝내면 '~형'으로 바꾼다."""
+    name = name.strip()
+    return name[:-1].rstrip() + "형" if name.endswith("족") else name
+
+
 def generate(audience_context, ages, segment_counts, client=None):
     count = len(segment_counts)
     allowed = _allowed_ages(ages)
@@ -124,6 +145,11 @@ def generate(audience_context, ages, segment_counts, client=None):
                                              messages=messages, output_format=Draft)
         except ValidationError as exc:
             raise GenerationError("생성 결과 형식이 맞지 않습니다.") from exc
+        except Exception as exc:
+            # 키 오류·한도·네트워크 등 모델 호출 자체의 실패. 500 이 아니라 이유를 알 수 있는 503 으로 돌려준다
+            # (예외 문구에는 요청 내용이 섞일 수 있어 종류만 내보내고, 자세한 것은 서버 로그에 남긴다)
+            logger.warning("페르소나 생성 모델 호출 실패: %s", type(exc).__name__, exc_info=True)
+            raise GenerationError(_call_failure(exc)) from exc
         if response.stop_reason in ("refusal", "max_tokens") or response.parsed_output is None:
             raise GenerationError("생성 모델이 결과를 주지 않았습니다.")
         draft = response.parsed_output
@@ -139,7 +165,7 @@ def generate(audience_context, ages, segment_counts, client=None):
             {"role": "user", "content": "These segments mention sensitive personal circumstances: "
                                         + ", ".join(flagged) + ". Rewrite all segments by usage goal and habit only, "
                                         "same count and age groups."}]
-    return [{"name": s.name.strip(), "variables": s.variables.model_dump(), "basis": [b for b in s.basis if b][:5],
+    return [{"name": _type_name(s.name), "variables": s.variables.model_dump(), "basis": [b for b in s.basis if b][:5],
              "age_group": s.age_group, "situation": s.situation.strip()} for s in draft.segments]
 
 
